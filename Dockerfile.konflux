@@ -1,5 +1,9 @@
 # Build Stage: using Go 1.24.1 image
-FROM quay.io/projectquay/golang:1.24 AS builder
+# At the monent, there is no Gotoolset 1.24 image available in the registry.redhat.io, so we are using the
+# openshift-golang-builder image from the registry.redhat.io/rh-osbs/openshift-golang-builder:v1.24
+# To-do: switch back to the registry.access.redhat.com/ubi9/go-toolset:1.24 image when it is available
+# FROM registry.access.redhat.com/ubi9/go-toolset:1.24 as builder
+FROM registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder:v1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -29,11 +33,12 @@ RUN ranlib lib/*.a
 ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
-RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go
+RUN go build -mod=mod -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go
 
 # Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+
 WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
 USER 65532:65532
