@@ -1,14 +1,10 @@
-arches:
-  - x86_64
 contentOrigin:
   repofiles:
     - ubi.repo
 packages:
-  - gcc
   - gcc-c++
   - libstdc++
   - libstdc++-devel
-  - cmake
   - clang
 context:
   containerfile: Dockerfile.konflux
