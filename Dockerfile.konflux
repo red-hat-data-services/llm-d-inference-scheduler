@@ -20,8 +20,8 @@ COPY go.sum go.sum
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
-echo ${TARGETOS}
-echo ${TARGETARCH}
+RUN echo " TARGETOS : $TARGETOS"
+RUN echo " TARGETARCH : $TARGETARCH"
 
 # HuggingFace tokenizer bindings
 RUN mkdir -p lib
