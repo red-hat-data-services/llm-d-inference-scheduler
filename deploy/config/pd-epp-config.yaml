@@ -1,0 +1,30 @@
+# Sample EPP configuration for tunning with P/D
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: prefill-header
+- type: prefix-cache
+  parameters:
+    hashBlockSize: 5
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 31250
+- type: prefill-filter
+- type: decode-filter
+- type: max-score
+- type: pd-profile-handler
+  parameters:
+    threshold: 10
+    hashBlockSize: 5
+schedulingProfiles:
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: max-score
+  - pluginRef: prefix-cache
+    weight: 50
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score
+  - pluginRef: prefix-cache
+    weight: 50
