@@ -25,7 +25,7 @@ RUN echo " TARGETARCH : $TARGETARCH"
 
 # HuggingFace tokenizer bindings
 RUN mkdir -p lib
-RUN curl -L https://github.com/daulet/tokenizers/releases/download/v1.20.2/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -C lib
+RUN tar -xz -f libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz -C lib
 RUN ranlib lib/*.a
 
 # Build

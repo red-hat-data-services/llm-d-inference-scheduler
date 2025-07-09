@@ -1,0 +1,7 @@
+metadata:
+  version: "1.0"
+artifacts:
+  - target: "libtokenizers.linux-amd64.tar.gz"
+    download_url: "https://github.com/daulet/tokenizers/releases/download/v1.20.2/libtokenizers.linux-amd64.tar.gz"
+    checksums:
+      sha256: "af0f391646c54255b4e522dc81514ee238bcce3a949a6d35b18076175f6c7a4e"
