@@ -23,6 +23,7 @@ COPY pkg/ pkg/
 RUN echo " TARGETOS : $TARGETOS"
 RUN echo " TARGETARCH : $TARGETARCH"
 RUN pwd
+RUN cd .. 
 RUN ls
 
 # HuggingFace tokenizer bindings
