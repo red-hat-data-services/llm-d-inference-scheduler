@@ -22,10 +22,9 @@ COPY pkg/ pkg/
 
 RUN echo " TARGETOS : $TARGETOS"
 RUN echo " TARGETARCH : $TARGETARCH"
-RUN pwd
-RUN cd .. 
 RUN ls
-
+RUN ls /cachi2/output/deps/generic/
+RUN cp /cachi2/output/deps/generic/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz /workspace
 # HuggingFace tokenizer bindings
 RUN mkdir -p lib
 RUN tar -xz -f libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz -C lib
