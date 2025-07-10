@@ -3,12 +3,13 @@
 # openshift-golang-builder image from the registry.redhat.io/rh-osbs/openshift-golang-builder:v1.24
 # To-do: switch back to the registry.access.redhat.com/ubi9/go-toolset:1.24 image when it is available
 # FROM registry.access.redhat.com/ubi9/go-toolset:1.24 as builder
-FROM registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder:v1.24 AS builder
+FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:v1.24@sha256:021ab8e6e4af3d1683b52ec985996f9421edb2111dc697b5781dee3c7595ae00 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
 # Install build tools
-RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
+# commenetd as these packges are present in ubi9
+# RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
 
 WORKDIR /workspace
 
@@ -20,9 +21,11 @@ COPY go.sum go.sum
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
+RUN cp /cachi2/output/deps/generic/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz /workspace
+
 # HuggingFace tokenizer bindings
 RUN mkdir -p lib
-RUN curl -L https://github.com/daulet/tokenizers/releases/download/v1.20.2/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -C lib
+RUN tar -xz -f libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz -C lib
 RUN ranlib lib/*.a
 
 # Build
