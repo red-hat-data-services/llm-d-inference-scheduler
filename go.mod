@@ -2,7 +2,7 @@ module github.com/llm-d/llm-d-inference-scheduler
 
 go 1.24.1
 
-toolchain go1.24.2
+toolchain go1.24.5
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
