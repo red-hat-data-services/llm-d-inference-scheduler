@@ -2,7 +2,10 @@ package filter
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
@@ -12,10 +15,49 @@ const (
 	ByLabelFilterType = "by-label"
 )
 
+type byLabelFilterParameters struct {
+	Label         string   `json:"label"`
+	ValidValues   []string `json:"validValues"`
+	AllowsNoLabel bool     `json:"allowsNoLabel"`
+}
+
+var _ framework.Filter = &ByLabel{} // validate interface conformance
+
+// ByLabelFilterFactory defines the factory function for the ByLabelFilter
+func ByLabelFilterFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	parameters := byLabelFilterParameters{}
+	if rawParameters != nil {
+		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' filter - %w", ByLabelFilterType, err)
+		}
+	}
+	return NewByLabel(name, parameters.Label, parameters.AllowsNoLabel, parameters.ValidValues...), nil
+}
+
+// NewByLabel creates and returns an instance of the RoleBasedFilter based on the input parameters
+// name - the filter name
+// labelName - the name of the label to use
+// allowsNoLabel - if true pods without given label will be considered as valid (not filtered out)
+// validValuesApp - list of valid values
+func NewByLabel(name string, labelName string, allowsNoLabel bool, validValues ...string) *ByLabel {
+	validValuesMap := map[string]struct{}{}
+
+	for _, v := range validValues {
+		validValuesMap[v] = struct{}{}
+	}
+
+	return &ByLabel{
+		typedName:     plugins.TypedName{Type: ByLabelFilterType, Name: name},
+		labelName:     labelName,
+		allowsNoLabel: allowsNoLabel,
+		validValues:   validValuesMap,
+	}
+}
+
 // ByLabel - filters out pods based on the values defined by the given label
 type ByLabel struct {
-	// name defines the filter name
-	name string
+	// name defines the filter typed name
+	typedName plugins.TypedName
 	// labelName defines the name of the label to be checked
 	labelName string
 	// validValues defines list of valid label values
@@ -24,31 +66,15 @@ type ByLabel struct {
 	allowsNoLabel bool
 }
 
-var _ framework.Filter = &ByLabel{} // validate interface conformance
-
-// NewByLabel creates and returns an instance of the RoleBasedFilter based on the input parameters
-// name - the filter name
-// labelName - the name of the label to use
-// allowsNoLabel - if true pods without given label will be considered as valid (not filtered out)
-// validValuesApp - list of valid values
-func NewByLabel(name string, labelName string, allowsNoLabel bool, validValuesApp ...string) *ByLabel {
-	validValues := map[string]struct{}{}
-
-	for _, v := range validValuesApp {
-		validValues[v] = struct{}{}
-	}
-
-	return &ByLabel{name: name, labelName: labelName, allowsNoLabel: allowsNoLabel, validValues: validValues}
+// TypedName returns the typed name of the plugin
+func (f *ByLabel) TypedName() plugins.TypedName {
+	return f.typedName
 }
 
-// Type returns the type of the filter
-func (f *ByLabel) Type() string {
-	return ByLabelFilterType
-}
-
-// Name returns the name of the filter
-func (f *ByLabel) Name() string {
-	return f.name
+// WithName sets the name of the plugin.
+func (f *ByLabel) WithName(name string) *ByLabel {
+	f.typedName.Name = name
+	return f
 }
 
 // Filter filters out all pods that are not marked with one of roles from the validRoles collection
