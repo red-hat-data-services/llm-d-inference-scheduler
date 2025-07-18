@@ -50,7 +50,7 @@ This evolved version removes the requirement for sidecars on the **prefill node*
      - If `prefill_worker_id == nil`, runs both stages locally by passing request to local vllm
      - If split:
        - Sends prefill job to Prefill Worker with a special header `do_remote_decode=true`
-       - Upon receiving response from Prefill Worker runs decode stage 
+       - Upon receiving response from Prefill Worker runs decode stage
 
 4. **Response Flow**
    - Response flows from decode sidecar → Envoy → EPP → User
@@ -74,7 +74,7 @@ This evolved version removes the requirement for sidecars on the **prefill node*
 ## Worker Selection Logic
 
 - **Decode Worker**:
-  - Prefer longest prefix match / KV cache utilization (depends on avaialble scorers)
+  - Prefer longest prefix match / KV cache utilization (depends on available scorers)
 
 - **Prefill Worker**:
   - High prefix-cache hit rate
@@ -119,7 +119,7 @@ This evolved version removes the requirement for sidecars on the **prefill node*
 
 ---
 
-## Diagram 
+## Diagram
 
 ![Disaggregated Prefill/Decode Architecture](./images/dp_architecture.png)
 
