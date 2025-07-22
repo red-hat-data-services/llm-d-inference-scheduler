@@ -52,3 +52,11 @@ EXPOSE 9003
 EXPOSE 9090
 
 ENTRYPOINT ["/app/epp"]
+
+LABEL com.redhat.component="odh-must-gather" \
+      name="odh-must-gather" \
+      description="odh-must-gather" \
+      summary="odh-must-gather" \
+      io.openshift.expose-services="9002/grpc,9003/grpc-health,9090/grpc-prometheus" \
+      io.k8s.display-name="odh-must-gather" \
+      io.k8s.description="odh-must-gather"
