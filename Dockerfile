@@ -1,7 +1,8 @@
-# Build Stage: using Go 1.24.1 image
-FROM quay.io/projectquay/golang:1.24 AS builder
+# Build Stage: using Go 1.24 image
+FROM registry.access.redhat.com/ubi9/go-toolset:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
+USER root 
 
 # Install build tools
 # The builder is based on UBI8, so we need epel-release-8.
