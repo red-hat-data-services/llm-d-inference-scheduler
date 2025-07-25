@@ -83,6 +83,8 @@ export PD_ENABLED="\"${PD_ENABLED:-false}\""
 # Token length threshold to trigger P/D logic
 export PD_PROMPT_LEN_THRESHOLD="\"${PD_PROMPT_LEN_THRESHOLD:-10}\""
 
+export EPP_CONFIG="${EPP_CONFIG:-deploy/config/epp-prefix-cache-tracking-config.yaml}"
+
 # Redis deployment name
 export REDIS_DEPLOYMENT_NAME="${REDIS_DEPLOYMENT_NAME:-lookup-server}"
 
@@ -90,7 +92,7 @@ export REDIS_DEPLOYMENT_NAME="${REDIS_DEPLOYMENT_NAME:-lookup-server}"
 export REDIS_SVC_NAME="${REDIS_SVC_NAME:-${REDIS_DEPLOYMENT_NAME}-service}"
 
 # Redis FQDN for internal Kubernetes communication
-export REDIS_HOST="${REDIS_HOST:-${REDIS_SVC_NAME}.${NAMESPACE}.svc.cluster.local}"
+export REDIS_HOST="${REDIS_HOST:-vllm-${REDIS_SVC_NAME}.${NAMESPACE}.svc.cluster.local}"
 
 # Redis port
 export REDIS_PORT="${REDIS_PORT:-8100}"
@@ -148,6 +150,8 @@ set -o pipefail
 
 if [[ "$CLEAN" == "true" ]]; then
   echo "INFO: CLEANING environment in namespace ${NAMESPACE}"
+  # Delete the ConfigMAp created for the EPP configuration
+  kubectl -n "${NAMESPACE}" delete --ignore-not-found=true ConfigMap epp-config
   # Delete inference schedulare and gateway resources.
   kustomize build deploy/environments/dev/kubernetes-kgateway | envsubst | kubectl -n "${NAMESPACE}" delete --ignore-not-found=true -f -
   # Delete vllm resources.
@@ -181,12 +185,14 @@ helm upgrade --install "$VLLM_HELM_RELEASE_NAME" "$VLLM_CHART_DIR" \
   --set vllm.gpuMemoryUtilization="${VLLM_GPU_MEMORY_UTILIZATION}" \
   --set vllm.tensorParallelSize="${VLLM_TENSOR_PARALLEL_SIZE}" \
   --set persistence.enabled=true \
-  --set persistence.size="$PVC_SIZE"\
-  --set redis.nameSuffix="$REDIS_DEPLOYMENT_NAME" \
-  --set redis.service.nameSuffix="$REDIS_SVC_NAME" \
-  --set redis.service.port="$REDIS_PORT"
+  --set persistence.size="$PVC_SIZE" \
+  --set lmcache.redis.enabled=true \
+  --set lmcache.redis.nameSuffix="$REDIS_DEPLOYMENT_NAME" \
+  --set lmcache.redis.service.nameSuffix="$REDIS_SVC_NAME" \
+  --set lmcache.redis.service.port="$REDIS_PORT"
 
 echo "INFO: Deploying Gateway Environment in namespace ${NAMESPACE}, ${POOL_NAME}"
+kubectl -n "${NAMESPACE}" create configmap epp-config --from-file=epp-config.yaml=<(envsubst < "${EPP_CONFIG}") --dry-run=client -o yaml | kubectl apply -f -
 kustomize build deploy/environments/dev/kubernetes-kgateway | envsubst | kubectl -n "${NAMESPACE}" apply -f -
 echo "INFO: Waiting for resources in namespace ${NAMESPACE} to become ready"
 # Wait for gateway resources

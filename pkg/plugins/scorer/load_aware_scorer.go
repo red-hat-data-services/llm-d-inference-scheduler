@@ -2,51 +2,70 @@ package scorer
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 const (
 	// LoadAwareScorerType is the type of the LoadAwareScorer
 	LoadAwareScorerType = "load-aware-scorer"
 
-	queueThresholdEnvName = "LOAD_AWARE_SCORER_QUEUE_THRESHOLD"
-	queueThresholdDefault = 128
+	// QueueThresholdDefault defines the default queue threshold value
+	QueueThresholdDefault = 128
 )
+
+type loadAwareScorerParameters struct {
+	Threshold int `json:"threshold"`
+}
 
 // compile-time type assertion
 var _ framework.Scorer = &LoadAwareScorer{}
 
+// LoadAwareScorerFactory defines the factory function for the LoadAwareScorer
+func LoadAwareScorerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+	parameters := loadAwareScorerParameters{Threshold: QueueThresholdDefault}
+	if rawParameters != nil {
+		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", LoadAwareScorerType, err)
+		}
+	}
+
+	return NewLoadAwareScorer(handle.Context(), parameters.Threshold).WithName(name), nil
+}
+
 // NewLoadAwareScorer creates a new load based scorer
-func NewLoadAwareScorer(ctx context.Context) framework.Scorer {
+func NewLoadAwareScorer(ctx context.Context, queueThreshold int) *LoadAwareScorer {
+	if queueThreshold <= 0 {
+		queueThreshold = QueueThresholdDefault
+		log.FromContext(ctx).V(logutil.DEFAULT).Info(fmt.Sprintf("queueThreshold %d should be positive, using default queue threshold %d", queueThreshold, QueueThresholdDefault))
+	}
+
 	return &LoadAwareScorer{
-		name:           LoadAwareScorerType,
-		queueThreshold: float64(env.GetEnvInt(queueThresholdEnvName, queueThresholdDefault, log.FromContext(ctx))),
+		typedName:      plugins.TypedName{Type: LoadAwareScorerType},
+		queueThreshold: float64(queueThreshold),
 	}
 }
 
 // LoadAwareScorer scorer that is based on load
 type LoadAwareScorer struct {
-	name           string
+	typedName      plugins.TypedName
 	queueThreshold float64
 }
 
-// Type returns the type of the scorer.
-func (s *LoadAwareScorer) Type() string {
-	return LoadAwareScorerType
+// TypedName returns the typed name of the plugin.
+func (s *LoadAwareScorer) TypedName() plugins.TypedName {
+	return s.typedName
 }
 
-// Name returns the name of the instance of the filter.
-func (s *LoadAwareScorer) Name() string {
-	return s.name
-}
-
-// WithName sets the name of the filter.
+// WithName sets the name of the plugin.
 func (s *LoadAwareScorer) WithName(name string) *LoadAwareScorer {
-	s.name = name
+	s.typedName.Name = name
 	return s
 }
 

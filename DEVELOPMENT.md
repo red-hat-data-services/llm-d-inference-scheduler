@@ -58,14 +58,14 @@ $ kubectl --context llm-d-inference-scheduler-dev get service inference-gateway
 # Wait for the LoadBalancer External-IP to become available. The service is accessible over port 80.
 ```
 
-You can now make requests macthing the IP:port of one of the access mode above:
+You can now make requests matching the IP:port of one of the access mode above:
 
 ```bash
 $ curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"food-review","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
 By default the created inference gateway, can be accessed on port 30080. This can
-be overriden to any free port in the range of 30000 to 32767, by running the above
+be overridden to any free port in the range of 30000 to 32767, by running the above
 command as follows:
 
 ```bash
@@ -137,9 +137,10 @@ clusters, the `default` namespace can be used directly.
 The following will deploy all the infrastructure-level requirements (e.g. CRDs,
 Operators, etc.) to support the namespace-level development environments:
 
-Install GIE CRDs:
+Install Gateway API + GIE CRDs:
 
 ```bash
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
 kubectl apply -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/latest/download/manifests.yaml
 ```
 
@@ -189,7 +190,7 @@ kubectl config set-context --current --namespace="${NAMESPACE}"
 export HF_TOKEN="<HF_TOKEN>"
 ```
 
-Download the `llm-d-kv-cache-manager` repository (the instllation script and Helm chart to install the vLLM environment):
+Download the `llm-d-kv-cache-manager` repository (the installation script and Helm chart to install the vLLM environment):
 
 ```bash
 cd .. && git clone git@github.com:llm-d/llm-d-kv-cache-manager.git
@@ -206,7 +207,7 @@ make env-dev-kubernetes
 
 This will deploy the entire stack to whatever namespace you chose.
 > [!NOTE]
-> The model and images of each componet can  be replaced. See [Environment Configuration](#environment-configuration) for model settings.
+> The model and images of each component can  be replaced. See [Environment Configuration](#environment-configuration) for model settings.
 
 You can test by exposing the `inference gateway` via port-forward:
 
