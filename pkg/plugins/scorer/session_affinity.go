@@ -3,10 +3,11 @@ package scorer
 import (
 	"context"
 	"encoding/base64"
-	"time"
+	"encoding/json"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -17,19 +18,22 @@ const (
 	// SessionAffinityScorerType is the type of the SessionAffinityScorer
 	SessionAffinityScorerType = "session-affinity-scorer"
 
-	sessionKeepAliveTime           = 60 * time.Minute  // How long should an idle session be kept alive
-	sessionKeepAliveCheckFrequency = 15 * time.Minute  // How often to check for overly idle sessions
-	sessionTokenHeader             = "x-session-token" // name of the session header in request
+	sessionTokenHeader = "x-session-token" // name of the session header in request
 )
 
 // compile-time type assertion
 var _ framework.Scorer = &SessionAffinity{}
 var _ requestcontrol.PostResponse = &SessionAffinity{}
 
+// SessionAffinityScorerFactory defines the factory function for SessionAffinityScorer.
+func SessionAffinityScorerFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	return NewSessionAffinity().WithName(name), nil
+}
+
 // NewSessionAffinity returns a scorer
 func NewSessionAffinity() *SessionAffinity {
 	return &SessionAffinity{
-		name: SessionAffinityScorerType,
+		typedName: plugins.TypedName{Type: SessionAffinityScorerType},
 	}
 }
 
@@ -38,22 +42,17 @@ func NewSessionAffinity() *SessionAffinity {
 // session was sent to, by giving that pod the specified weight and assigning
 // zero score to the rest of the targets
 type SessionAffinity struct {
-	name string
+	typedName plugins.TypedName
 }
 
-// Type returns the type of the scorer.
-func (s *SessionAffinity) Type() string {
-	return SessionAffinityScorerType
+// TypedName returns the typed name of the plugin.
+func (s *SessionAffinity) TypedName() plugins.TypedName {
+	return s.typedName
 }
 
-// Name returns the name of the instance of the filter.
-func (s *SessionAffinity) Name() string {
-	return s.name
-}
-
-// WithName sets the name of the filter.
+// WithName sets the name of the plugin.
 func (s *SessionAffinity) WithName(name string) *SessionAffinity {
-	s.name = name
+	s.typedName.Name = name
 	return s
 }
 
@@ -91,7 +90,7 @@ func (s *SessionAffinity) PostResponse(ctx context.Context, _ *types.LLMRequest,
 		if response != nil {
 			reqID = response.RequestId
 		}
-		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of ctx.Resp, pod, pod.GetPod is nil", "req id", reqID)
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of response, targetPod is nil", "req id", reqID)
 		return
 	}
 

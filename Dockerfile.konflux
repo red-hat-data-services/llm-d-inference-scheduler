@@ -1,9 +1,5 @@
-# Build Stage: using Go 1.24.1 image
-# At the monent, there is no Gotoolset 1.24 image available in the registry.redhat.io, so we are using the
-# openshift-golang-builder image from the registry.redhat.io/rh-osbs/openshift-golang-builder:v1.24
-# To-do: switch back to the registry.access.redhat.com/ubi9/go-toolset:1.24 image when it is available
-# FROM registry.access.redhat.com/ubi9/go-toolset:1.24 as builder
-FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:v1.24@sha256:beed4519c775d6123c11351048be29e6f93ab0adaea2c7d55977b445966f5b27 AS builder
+# Build Stage: using Go 1.24 image
+FROM registry.access.redhat.com/ubi9/go-toolset:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 

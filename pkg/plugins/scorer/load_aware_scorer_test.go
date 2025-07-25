@@ -21,21 +21,22 @@ func TestLoadBasedScorer(t *testing.T) {
 		name    string
 		scorer  framework.Scorer
 		req     *types.LLMRequest
-		input   []backendmetrics.PodMetrics
+		input   []types.Pod
 		wantRes *types.ProfileRunResult
 		err     bool
 	}{
 		{
 			name:   "load based scorer",
-			scorer: scorer.NewLoadAwareScorer(context.Background()),
+			scorer: scorer.NewLoadAwareScorer(context.Background(), 10),
+
 			req: &types.LLMRequest{
 				TargetModel: "critical",
 			},
 			// pod2 will be picked because it has the shortest queue
-			input: []backendmetrics.PodMetrics{
-				&backendmetrics.FakePodMetrics{
+			input: []types.Pod{
+				&types.PodMetrics{
 					Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}},
-					Metrics: &backendmetrics.MetricsState{
+					MetricsState: &backendmetrics.MetricsState{
 						WaitingQueueSize:    2,
 						KVCacheUsagePercent: 0.2,
 						MaxActiveModels:     2,
@@ -46,9 +47,9 @@ func TestLoadBasedScorer(t *testing.T) {
 					},
 				},
 
-				&backendmetrics.FakePodMetrics{
+				&types.PodMetrics{
 					Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}},
-					Metrics: &backendmetrics.MetricsState{
+					MetricsState: &backendmetrics.MetricsState{
 						WaitingQueueSize:    0,
 						KVCacheUsagePercent: 0.2,
 						MaxActiveModels:     2,
@@ -58,9 +59,9 @@ func TestLoadBasedScorer(t *testing.T) {
 						},
 					},
 				},
-				&backendmetrics.FakePodMetrics{
+				&types.PodMetrics{
 					Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod3"}},
-					Metrics: &backendmetrics.MetricsState{
+					MetricsState: &backendmetrics.MetricsState{
 						WaitingQueueSize:    5,
 						KVCacheUsagePercent: 0.2,
 						MaxActiveModels:     2,
@@ -72,11 +73,10 @@ func TestLoadBasedScorer(t *testing.T) {
 				},
 			},
 			wantRes: &types.ProfileRunResult{
-				TargetPod: &types.ScoredPod{
+				TargetPods: []types.Pod{&types.ScoredPod{
 					Pod: &types.PodMetrics{
 						Pod: &backend.Pod{
 							NamespacedName: k8stypes.NamespacedName{Name: "pod2"},
-							Labels:         map[string]string{},
 						},
 						MetricsState: &backendmetrics.MetricsState{
 							WaitingQueueSize:    0,
@@ -86,10 +86,10 @@ func TestLoadBasedScorer(t *testing.T) {
 								"foo": 1,
 								"bar": 1,
 							},
-							WaitingModels: map[string]int{},
 						},
 					},
 					Score: 0.5,
+				},
 				},
 			},
 		},
@@ -99,9 +99,9 @@ func TestLoadBasedScorer(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			schedulerProfile := framework.NewSchedulerProfile().
 				WithScorers(framework.NewWeightedScorer(test.scorer, 1)).
-				WithPicker(picker.NewMaxScorePicker())
+				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 
-			got, err := schedulerProfile.Run(context.Background(), test.req, nil, types.ToSchedulerPodMetrics(test.input))
+			got, err := schedulerProfile.Run(context.Background(), test.req, nil, test.input)
 
 			if test.err != (err != nil) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
