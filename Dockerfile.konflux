@@ -6,8 +6,14 @@ ARG TARGETARCH
 # Install build tools
 # commenetd as these packges are present in ubi9
 # RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
-
 WORKDIR /workspace
+USER root
+RUN cp /cachi2/output/deps/generic/epel-release-latest-8.noarch.rpm /workspace
+
+# Install packages (cachi2 environment automatically sourced by Konflux)
+RUN dnf install -y epel-release-latest-8.noarch.rpm && \
+    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig && \
+    dnf clean all
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -40,6 +46,17 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
+
+# Install zeromq runtime library needed by the manager.
+# The final image is UBI9, so we need epel-release-9.
+USER root
+COPY --from=builder /cachi2/output/deps/generic/epel-release-latest-9.noarch.rpm /tmp/
+RUN microdnf install -y dnf && \
+    dnf install -y /tmp/epel-release-latest-9.noarch.rpm && \
+    dnf install -y zeromq && \
+    dnf clean all && \
+    rm -f /tmp/epel-release-latest-9.noarch.rpm
+
 USER 65532:65532
 
 # expose gRPC, health and metrics ports
