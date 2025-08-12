@@ -1,0 +1,8 @@
+contentOrigin:
+  repofiles: ["./ubi.repo"]
+packages:
+  - gcc-c++ 
+  - libstdc++ 
+  - libstdc++-devel 
+  - clang 
+  - pkgconfig
