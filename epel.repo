@@ -2,19 +2,20 @@
 name=Extra Packages for Enterprise Linux 9 - $basearch
 metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-9&arch=$basearch
 enabled=1
-gpgcheck=1
+gpgcheck=0
 gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-9
 
 [epel-debuginfo]
 name=Extra Packages for Enterprise Linux 9 - $basearch - Debug
 baseurl=https://download.fedoraproject.org/pub/epel/9/Everything/$basearch/debug/
 enabled=0
-gpgcheck=1
+gpgcheck=0
 gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-9
 
 [epel-source]
 name=Extra Packages for Enterprise Linux 9 - $basearch - Source
 baseurl=https://download.fedoraproject.org/pub/epel/9/Everything/$basearch/Source/
 enabled=0
-gpgcheck=1
+gpgcheck=0
 gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-9
+
