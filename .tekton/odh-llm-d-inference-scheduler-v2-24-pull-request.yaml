@@ -45,9 +45,12 @@ spec:
         {
           "type": "rpm",
           "path": ".",
-          "dnf": {
-            "epel": {
-              "gpgcheck": 0
+          "include_summary_in_sbom": true,
+          "options": {
+            "dnf": {
+              "epel-9": {
+                "gpgcheck": "0"
+              }
             }
           }
         }
