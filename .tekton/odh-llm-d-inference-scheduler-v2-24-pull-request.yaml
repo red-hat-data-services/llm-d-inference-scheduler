@@ -48,7 +48,7 @@ spec:
           "include_summary_in_sbom": true,
           "options": {
             "dnf": {
-              "epel-9": {
+              "epel": {
                 "gpgcheck": "0"
               }
             }
