@@ -57,6 +57,7 @@ USER root
 
 
 RUN microdnf install -y dnf && \
+    cp /cachi2/output/deps/generic/epel-release-latest-9.noarch.rpm . && \
     dnf install -y epel-release-latest-9.noarch.rpm && \
     dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
     dnf install -y zeromq
