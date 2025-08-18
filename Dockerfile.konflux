@@ -56,7 +56,7 @@ COPY --from=builder /workspace/bin/epp /app/epp
 USER root
 
 
-RUN microdnf install -y zeromq
+#RUN microdnf install -y zeromq
 
 USER 65532:65532
 
