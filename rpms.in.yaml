@@ -1,0 +1,11 @@
+contentOrigin:
+  repofiles: 
+    - "./ubi.repo"
+    - "./epel.repo"
+packages:
+  - gcc-c++
+  - libstdc++
+  - libstdc++-devel
+  - clang
+  - pkgconfig
+  - zeromq-devel
