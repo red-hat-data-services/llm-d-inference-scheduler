@@ -14,8 +14,7 @@ RUN cp /cachi2/output/deps/generic/epel-release-latest-9.noarch.rpm /workspace
 # Install build tools
 # commenetd as these packges are present in ubi9
 # RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
-RUN dnf install -y epel-release-latest-9.noarch.rpm && \
-    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig && \
+RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig && \
     dnf clean all
 
 
@@ -54,14 +53,8 @@ COPY --from=builder /workspace/bin/epp /app/epp
 # Install zeromq runtime library needed by the manager.
 # The final image is UBI9, so we need epel-release-9.
 USER root
-RUN cp /cachi2/output/deps/generic/epel-release-latest-9.noarch.rpm . && \
-    dnf install -y epel-release-latest-9.noarch.rpm && \
-    dnf install -y zeromq
 
-#RUN microdnf install -y dnf && \
-    #dnf install -y epel-release-latest-9.noarch.rpm && \
-    #dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
-    #dnf install -y zeromq
+RUN microdnf install -y zeromq
 
 USER 65532:65532
 
