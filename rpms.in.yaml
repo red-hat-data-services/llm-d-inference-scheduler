@@ -9,3 +9,4 @@ packages:
   - clang
   - pkgconfig
   - zeromq-devel
+  - dnf
