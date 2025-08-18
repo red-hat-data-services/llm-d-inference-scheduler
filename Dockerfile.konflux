@@ -16,8 +16,6 @@ RUN cp /cachi2/output/deps/generic/epel-release-latest-9.noarch.rpm /workspace
 # RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
 RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig && \
     dnf clean all
-
-
 # Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum
