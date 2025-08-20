@@ -1,3 +1,6 @@
+arches:
+  - x86_64
+  - aarch64
 contentOrigin:
   repofiles: 
     - "./ubi.repo"
@@ -6,6 +9,5 @@ packages:
   - gcc-c++
   - libstdc++
   - libstdc++-devel
-  - clang
   - pkgconfig
   - zeromq-devel
