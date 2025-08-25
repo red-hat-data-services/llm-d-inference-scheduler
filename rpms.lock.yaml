@@ -32,13 +32,13 @@ arches:
     name: glibc-devel
     evr: 2.34-168.el9_6.23
     sourcerpm: glibc-2.34-168.el9_6.23.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/k/kernel-headers-5.14.0-570.35.1.el9_6.aarch64.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/k/kernel-headers-5.14.0-570.37.1.el9_6.aarch64.rpm
     repoid: ubi-9-appstream-rpms
-    size: 3667373
-    checksum: sha256:062c0872333408b52aab8e7c6bc948b138cebd85032c68fd83726de8de8deea2
+    size: 3668185
+    checksum: sha256:e89600d4c00fc468251dfa7fb9aee3249b6c29e61224148422f9914ac9f8bf8c
     name: kernel-headers
-    evr: 5.14.0-570.35.1.el9_6
-    sourcerpm: kernel-5.14.0-570.35.1.el9_6.src.rpm
+    evr: 5.14.0-570.37.1.el9_6
+    sourcerpm: kernel-5.14.0-570.37.1.el9_6.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/k/keyutils-libs-devel-1.6.3-1.el9.aarch64.rpm
     repoid: ubi-9-appstream-rpms
     size: 66048
