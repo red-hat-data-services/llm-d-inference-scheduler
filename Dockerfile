@@ -5,9 +5,7 @@ ARG TARGETARCH
 USER root 
 
 # Install build tools
-# The builder is based on UBI8, so we need epel-release-8.
-RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
-    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig && \
+RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig && \
     dnf clean all
 
 WORKDIR /workspace
@@ -42,11 +40,8 @@ WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
 
 # Install zeromq runtime library needed by the manager.
-# The final image is UBI9, so we need epel-release-9.
 USER root
-RUN microdnf install -y dnf && \
-    dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
-    dnf install -y zeromq
+RUN microdnf install -y zeromq
 
 USER 65532:65532
 

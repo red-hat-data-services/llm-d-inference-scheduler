@@ -9,7 +9,4 @@ artifacts:
     download_url: "https://github.com/daulet/tokenizers/releases/download/v1.22.2/libtokenizers.linux-arm64.tar.gz"
     checksums:
       sha256: "25c1678dba890f234079838620e1019951a45103526d08a61eacaa58f804e3d4"
-  - target: "epel-release-latest-9.noarch.rpm"
-    download_url: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
-    checksums:
-      sha256: "f37633d205b3af14ced35e858da38c6275b12b16f7e8d3f809af725c7077cec5"
+
