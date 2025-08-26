@@ -11,3 +11,4 @@ packages:
   - libstdc++-devel
   - pkgconfig
   - zeromq-devel
+  - zeromq
