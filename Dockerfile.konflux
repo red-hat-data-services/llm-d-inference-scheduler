@@ -10,9 +10,7 @@ WORKDIR /workspace
 USER root
 RUN cp /cachi2/output/deps/generic/epel-release-latest-9.noarch.rpm /workspace
 
-# Install EPEL release package to set up repository and GPG keys
-RUN dnf install -y /workspace/epel-release-latest-9.noarch.rpm && \
-    rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-9
+
 
 # Install build tools
 # commenetd as these packges are present in ubi9
