@@ -8,7 +8,7 @@ USER root
 
 WORKDIR /workspace
 USER root
-RUN cp /cachi2/output/deps/generic/epel-release-latest-9.noarch.rpm /workspace
+#RUN cp /cachi2/output/deps/generic/epel-release-latest-9.noarch.rpm /workspace
 
 
 # Install build tools
