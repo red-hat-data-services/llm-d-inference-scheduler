@@ -10,7 +10,6 @@ WORKDIR /workspace
 USER root
 RUN cp /cachi2/output/deps/generic/epel-release-latest-9.noarch.rpm /workspace
 
-
 # Install build tools
 # commenetd as these packges are present in ubi9
 # RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
@@ -50,7 +49,7 @@ WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
 
 # Install zeromq runtime library needed by the manager.
-# The final image is UBI9, so we need epel-release-9.
+# Using RPM prefetching for zeromq dependency.
 USER root
 
 RUN microdnf install -y zeromq
