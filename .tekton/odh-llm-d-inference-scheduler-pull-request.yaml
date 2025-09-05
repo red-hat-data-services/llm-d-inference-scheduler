@@ -39,22 +39,7 @@ spec:
     value: true
   - name: prefetch-input
     value: |
-      [
-        {"type": "gomod", "path": "."},
-        {"path": ".", "type": "generic"},
-        {
-          "type": "rpm",
-          "path": ".",
-          "include_summary_in_sbom": true,
-          "options": {
-            "dnf": {
-              "epel": {
-                "gpgcheck": "0"
-              }
-            }
-          }
-        }
-      ]
+      [{"type": "gomod", "path": "."}, {"path": ".", "type": "generic"}]
   - name: build-source-image
     value: true
   - name: build-image-index
@@ -65,6 +50,8 @@ spec:
     - linux-m2xlarge/arm64
   - name: image-expires-after
     value: 5d
+  - name: enable-slack-failure-notification
+    value: "false"
   pipelineRef:
     resolver: git
     params:
