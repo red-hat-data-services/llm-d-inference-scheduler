@@ -4,11 +4,10 @@ FROM registry.redhat.io/ubi9/go-toolset:1.24@sha256:14c369670cf3473d8e9b93e42d12
 
 ARG TARGETOS
 ARG TARGETARCH
-USER root 
+USER root
 
 WORKDIR /workspace
 USER root
-RUN cp /cachi2/output/deps/generic/epel-release-latest-9.noarch.rpm /workspace
 
 
 # Install build tools

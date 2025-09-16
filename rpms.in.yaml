@@ -2,12 +2,13 @@ arches:
   - x86_64
   - aarch64
 contentOrigin:
-  repofiles: 
+  repofiles:
     - "./ubi.repo"
-    - "./epel.repo"
+    - "./rhelai.repo"
 packages:
   - gcc-c++
   - libstdc++
   - libstdc++-devel
   - pkgconfig
+  - zeromq
   - zeromq-devel
