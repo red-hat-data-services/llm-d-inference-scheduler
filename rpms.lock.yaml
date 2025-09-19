@@ -429,14 +429,14 @@ arches:
     size: 429770
     checksum: sha256:7e47b7d486f8f0ac10a2b9c71b3afcd97485aa6e51b49dd0b83de7c4c52a89d1
     name: zeromq
-    evr: 4.3.4-5.el9ai
+    evr: 4.3.4-2.el9
     sourcerpm: zeromq-4.3.4-2.el9.src.rpm
   - url: https://download.fedoraproject.org/pub/epel/9/Everything/aarch64/Packages/z/zeromq-devel-4.3.4-2.el9.aarch64.rpm
     repoid: epel
     size: 15862
     checksum: sha256:d1f1657c69c2c4d322b42691297a033fed146320933dfdd8a1a751b89e9ac4cd
     name: zeromq-devel
-    evr: 4.3.4-5.el9ai
+    evr: 4.3.4-2.el9
     sourcerpm: zeromq-4.3.4-2.el9.src.rpm
   source: []
   module_metadata: []
