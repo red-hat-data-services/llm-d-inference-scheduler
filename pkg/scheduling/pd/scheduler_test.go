@@ -3,10 +3,12 @@ package pd_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr/testr"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -98,6 +100,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "no candidate pods",
 			req: &types.LLMRequest{
+				RequestId:   uuid.NewString(),
 				TargetModel: "any-model",
 				Prompt:      "12345678901",
 			},
@@ -107,6 +110,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "one decode pod, long prompt",
 			req: &types.LLMRequest{
+				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
 				Prompt:      "12345678901",
 			},
@@ -117,6 +121,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "one prefill pod, long prompt",
 			req: &types.LLMRequest{
+				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
 				Prompt:      "12345678901",
 			},
@@ -127,6 +132,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "1P1D - long prompt",
 			req: &types.LLMRequest{
+				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
 				Prompt:      "12345678906",
 			},
@@ -138,6 +144,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "1P1Dshort",
 			req: &types.LLMRequest{
+				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
 				Prompt:      "12345",
 			},
@@ -150,6 +157,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "TestRolesWithNoDecode",
 			req: &types.LLMRequest{
+				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
 				Prompt:      "12345678901",
 			},
@@ -177,6 +185,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "1P2D - long prompt",
 			req: &types.LLMRequest{
+				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
 				Prompt:      "12345678906",
 			},
@@ -195,22 +204,22 @@ func TestPDSchedule(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			//  initialize scheduler with config
-			prefixScorer := prefix.New(prefix.Config{HashBlockSize: 5, MaxPrefixBlocksToMatch: 256, LRUCapacityPerServer: 31250})
+			prefixScorer := prefix.New(ctx, prefix.Config{HashBlockSize: 5, MaxPrefixBlocksToMatch: 256, LRUCapacityPerServer: 31250})
 
 			prefillSchedulerProfile := framework.NewSchedulerProfile().
-				WithFilters(filter.NewPrefillFilter()).
+				WithFilters(filter.NewPrefillRole()).
 				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err := prefillSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 50))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
 			decodeSchedulerProfile := framework.NewSchedulerProfile().
-				WithFilters(filter.NewDecodeFilter()).
-				WithScorers(framework.NewWeightedScorer(scorer.NewLoadAwareScorer(ctx, scorer.QueueThresholdDefault), 1)).
+				WithFilters(filter.NewDecodeRole()).
+				WithScorers(framework.NewWeightedScorer(scorer.NewLoadAware(ctx, scorer.QueueThresholdDefault), 1)).
 				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err = decodeSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 0))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
-			profileHandle := profile.NewPdProfileHandler(prefill, decode, 10, 5)
+			profileHandle := profile.NewPdProfileHandler(prefill, decode, prefixScorer.TypedName().Name, 10, 5)
 
 			schedulerConfig := scheduling.NewSchedulerConfig(profileHandle, map[string]*framework.SchedulerProfile{
 				prefill: prefillSchedulerProfile,
@@ -228,6 +237,10 @@ func TestPDSchedule(t *testing.T) {
 			}
 
 			if test.wantRes2 != nil { // Checking the prefix match in the decode pod.
+				// make sure prefix plugin stores the prefix hit in cache, so we can test it in the following schedule call
+				prefixScorer.PreRequest(ctx, test.req, got, 0)
+				time.Sleep(time.Second)
+
 				got, err = scheduler.Schedule(ctx, test.req, test.input)
 				if test.err != (err != nil) {
 					t.Errorf("Unexpected error in schedule call, got %v, want %v", err, test.err)
