@@ -21,6 +21,12 @@ spec:
         args:
         - "--port=8000"
         - "--model=${MODEL_NAME}"
+        - "--enable-kvcache=${KV_CACHE_ENABLED}"
+        - "--kv-cache-size=1024"
+        - "--block-size=16"
+        - "--zmq-endpoint=tcp://${EPP_NAME}.default.svc.cluster.local:5557"
+        - "--event-batch-size=16"
+        - "--tokenizers-cache-dir=/tokenizer-cache"
         ports:
         - name: http
           containerPort: 8000
@@ -28,3 +34,12 @@ spec:
         env:
         - name: PORT
           value: "8000"
+        - name: PYTHONHASHSEED
+          value: "42"
+        volumeMounts:
+        - name: tokenizer-cache
+          mountPath: /tokenizer-cache
+      volumes:
+      - name: tokenizer-cache
+        emptyDir: {}
+
