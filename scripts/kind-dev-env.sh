@@ -36,16 +36,21 @@ export EPP_TAG="${EPP_TAG:-dev}"
 
 # Set the model name to deploy
 export MODEL_NAME="${MODEL_NAME:-food-review}"
+# Extract model family (e.g., "meta-llama" from "meta-llama/Llama-3.1-8B-Instruct")
+export MODEL_FAMILY="${MODEL_NAME%%/*}"
+# Extract model ID (e.g., "Llama-3.1-8B-Instruct")
+export MODEL_ID="${MODEL_NAME##*/}"
 # Safe model name for Kubernetes resources (lowercase, hyphenated)
-export MODEL_NAME_SAFE=$(echo "${MODEL_NAME}" | tr '[:upper:]' '[:lower:]' | tr ' /_.' '-')
+export MODEL_NAME_SAFE=$(echo "${MODEL_ID}" | tr '[:upper:]' '[:lower:]' | tr ' /_.' '-')
+
 # Set the endpoint-picker to deploy
-export EPP_NAME="${EPP_NAME:-${MODEL_NAME}-endpoint-picker}"
+export EPP_NAME="${EPP_NAME:-${MODEL_NAME_SAFE}-endpoint-picker}"
 
 # Set the default routing side car image tag
 export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-0.0.6}"
 
 # Set the inference pool name for the deployment
-export POOL_NAME="${POOL_NAME:-${MODEL_NAME}-inference-pool}"
+export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
 
 # vLLM replica count (without PD)
 export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
@@ -53,15 +58,28 @@ export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 # By default we are not setting up for PD
 export PD_ENABLED="\"${PD_ENABLED:-false}\""
 
+# By default we are not setting up for KV cache
+export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
+
 # Replica counts for P and D
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
 export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
 
 if [ "${PD_ENABLED}" != "\"true\"" ]; then
-  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
+  if [ "${KV_CACHE_ENABLED}" != "true" ]; then
+    DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
+  else
+    DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
+  fi
 else
-  DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
+  if [ "${KV_CACHE_ENABLED}" != "true" ]; then
+    DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
+  else
+    echo "Invalid configuration: PD_ENABLED=true and KV_CACHE_ENABLED=true is not supported"
+    exit 1
+  fi
 fi
+
 export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
 # ------------------------------------------------------------------------------
 # Setup & Requirement Checks
@@ -172,11 +190,13 @@ else
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
 fi
 
+kubectl --context ${KUBE_CONTEXT} delete configmap epp-config --ignore-not-found
 kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${EPP_CONFIG}
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \
-  ${PD_ENABLED} ${ROUTING_SIDECAR_TAG} ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D}' \
+  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${ROUTING_SIDECAR_TAG} \
+  ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------

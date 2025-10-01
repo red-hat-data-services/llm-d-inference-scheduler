@@ -34,17 +34,10 @@ import (
 )
 
 func main() {
-	setupLog := ctrl.Log.WithName("setup")
-	ctx := ctrl.SetupSignalHandler()
-
-	// Register GIE plugins
-	runner.RegisterAllPlugins()
-
 	// Register llm-d-inference-scheduler plugins
 	plugins.RegisterAllPlugins()
 
-	if err := runner.NewRunner().Run(ctx); err != nil {
-		setupLog.Error(err, "failed to run llm-d-scheduler")
+	if err := runner.NewRunner().Run(ctrl.SetupSignalHandler()); err != nil {
 		os.Exit(1)
 	}
 }
