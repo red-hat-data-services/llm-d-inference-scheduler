@@ -8,11 +8,11 @@ metadata:
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "release-0.3"
+      == "release-0.3.1"
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: opendatahub-release
-    appstudio.openshift.io/component: llm-d-inference-scheduler
+    appstudio.openshift.io/component: llm-d-inference-scheduler-e850f
     pipelines.appstudio.openshift.io/type: build
   name: llm-d-inference-scheduler-on-push
   namespace: open-data-hub-tenant
@@ -657,7 +657,7 @@ spec:
     - name: netrc
       optional: true
   taskRunTemplate:
-    serviceAccountName: build-pipeline-llm-d-inference-scheduler
+    serviceAccountName: build-pipeline-llm-d-inference-scheduler-e850f
   workspaces:
   - name: git-auth
     secret:
