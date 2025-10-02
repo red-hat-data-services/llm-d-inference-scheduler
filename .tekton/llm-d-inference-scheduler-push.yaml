@@ -12,7 +12,7 @@ metadata:
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: opendatahub-release
-    appstudio.openshift.io/component: llm-d-inference-scheduler-e850f
+    appstudio.openshift.io/component: llm-d-inference-scheduler
     pipelines.appstudio.openshift.io/type: build
   name: llm-d-inference-scheduler-on-push
   namespace: open-data-hub-tenant
@@ -657,7 +657,7 @@ spec:
     - name: netrc
       optional: true
   taskRunTemplate:
-    serviceAccountName: build-pipeline-llm-d-inference-scheduler-e850f
+    serviceAccountName: build-pipeline-llm-d-inference-scheduler
   workspaces:
   - name: git-auth
     secret:
