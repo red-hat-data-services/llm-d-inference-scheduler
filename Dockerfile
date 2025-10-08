@@ -22,7 +22,9 @@ COPY pkg/ pkg/
 
 # HuggingFace tokenizer bindings
 RUN mkdir -p lib
-RUN curl -L https://github.com/daulet/tokenizers/releases/download/v1.20.2/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -C lib
+# Ensure that the RELEASE_VERSION matches the one used in the imported llm-d-kv-cache-manager version
+ARG RELEASE_VERSION=v1.22.1
+RUN curl -L https://github.com/daulet/tokenizers/releases/download/${RELEASE_VERSION}/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -C lib
 RUN ranlib lib/*.a
 
 # Build
@@ -33,7 +35,9 @@ RUN ranlib lib/*.a
 ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
-RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go
+ARG COMMIT_SHA=unknown
+ARG BUILD_REF
+RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib' -X sigs.k8s.io/gateway-api-inference-extension/version.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/version.BuildRef=${BUILD_REF}" cmd/epp/main.go
 
 # Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
@@ -46,7 +50,9 @@ COPY --from=builder /workspace/bin/epp /app/epp
 USER root
 RUN microdnf install -y dnf && \
     dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
-    dnf install -y zeromq
+    dnf install -y zeromq && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf /var/lib/dnf
 
 USER 65532:65532
 
