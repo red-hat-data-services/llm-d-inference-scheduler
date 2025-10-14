@@ -3,11 +3,11 @@ metadata:
   version: "1.0"
 artifacts:
   - filename: "libtokenizers.linux-amd64.tar.gz"
-    download_url: "https://github.com/daulet/tokenizers/releases/download/v1.22.1/libtokenizers.linux-amd64.tar.gz"
-    checksum: sha256:b386f3d1c9a176a3da885933b287a59b852d7ce93be28b42588d1bd098a52f60
+    download_url: "https://github.com/daulet/tokenizers/releases/download/v1.22.2/libtokenizers.linux-amd64.tar.gz"
+    checksum: sha256:c5f6e6f63491c297d754bde0783c50a04df2b959907a87cb0c81ac7d3b6b4b63
   - filename: "libtokenizers.linux-arm64.tar.gz"
-    download_url: "https://github.com/daulet/tokenizers/releases/download/v1.22.1/libtokenizers.linux-arm64.tar.gz"
-    checksum: sha256:3ebc05dded31c37a1285bada04b5abb3ba751c2fc902a8e2adc63454fbb77af6
+    download_url: "https://github.com/daulet/tokenizers/releases/download/v1.22.2/libtokenizers.linux-arm64.tar.gz"
+    checksum: sha256:25c1678dba890f234079838620e1019951a45103526d08a61eacaa58f804e3d4
   - filename: "epel-release-latest-8.noarch.rpm"
     download_url: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm"
     checksum: sha256:b2ad52c14a403045e37ffd65c18283e03e656dc9c6088865f4acdb8835b165c8
