@@ -6,9 +6,7 @@ contentOrigin:
     - "./ubi.repo"
     - "./rhelai.repo"
 packages:
-  - gcc-c++
-  - libstdc++
-  - libstdc++-devel
-  - pkgconfig
+  # Only list packages NOT already in the base image (ubi9/go-toolset already has gcc-c++, libstdc++, etc.)
+  # zeromq packages are available from Red Hat Enterprise Linux AI repository
   - zeromq
   - zeromq-devel
