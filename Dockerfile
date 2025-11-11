@@ -4,13 +4,19 @@ ARG TARGETOS
 ARG TARGETARCH
 USER root 
 
-# Install build tools
-# The builder is based on UBI8, so we need epel-release-8.
-RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
-    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig && \
-    dnf clean all
-
 WORKDIR /workspace
+
+# Copy Red Hat repository configuration for zeromq packages
+COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
+
+# Install build tools including Rust for building libtokenizers from source
+# zeromq-devel is available from Red Hat Enterprise Linux AI repository
+RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig rust cargo git && \
+    dnf clean all && \
+    # Install rustup for cross-compilation support
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    export PATH="/root/.cargo/bin:${PATH}" && \
+    rustup default stable
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -20,12 +26,26 @@ COPY go.sum go.sum
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
-# HuggingFace tokenizer bindings
-RUN mkdir -p lib
-# Ensure that the RELEASE_VERSION matches the one used in the imported llm-d-kv-cache-manager version
+# Build libtokenizers from source to comply with conforma requirements
+# This replaces the GitHub download
 ARG RELEASE_VERSION=v1.22.1
-RUN curl -L https://github.com/daulet/tokenizers/releases/download/${RELEASE_VERSION}/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -C lib
-RUN ranlib lib/*.a
+# Map TARGETARCH to Rust target triple for cross-compilation
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN case "${TARGETARCH}" in \
+        amd64) RUST_TARGET="x86_64-unknown-linux-gnu" ;; \
+        arm64) RUST_TARGET="aarch64-unknown-linux-gnu" ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    rustup target add ${RUST_TARGET} && \
+    mkdir -p lib && \
+    mkdir -p /tmp/tokenizers-build && \
+    cd /tmp/tokenizers-build && \
+    git clone --depth 1 --branch ${RELEASE_VERSION} https://github.com/daulet/tokenizers.git . && \
+    CARGO_BUILD_TARGET=${RUST_TARGET} make build && \
+    find target/${RUST_TARGET}/release -name "libtokenizers.a" -type f | head -1 | xargs -I {} cp {} /workspace/lib/ && \
+    ranlib /workspace/lib/*.a && \
+    cd /workspace && \
+    rm -rf /tmp/tokenizers-build
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
@@ -46,10 +66,13 @@ WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
 
 # Install zeromq runtime library needed by the manager.
-# The final image is UBI9, so we need epel-release-9.
+# zeromq is available from Red Hat Enterprise Linux AI repository
 USER root
+
+# Copy Red Hat repository configuration for zeromq packages
+COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
+
 RUN microdnf install -y dnf && \
-    dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
     dnf install -y zeromq && \
     dnf clean all && \
     rm -rf /var/cache/dnf /var/lib/dnf
