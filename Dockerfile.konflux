@@ -27,16 +27,16 @@ RUN dnf install -y zeromq-devel rust cargo llvm-libs annobin && \
 COPY go.mod go.mod
 COPY go.sum go.sum
 
-# Copy the Rust manifests (Cargo.toml and Cargo.lock) for cachi2 to vendor dependencies
-COPY Cargo.toml Cargo.toml
-COPY Cargo.lock Cargo.lock
-
 # Copy the go source
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
 # Copy the tokenizers submodule
 COPY tokenizers/ tokenizers/
+
+# Copy the Rust manifests (Cargo.toml and Cargo.lock) from the submodule for cachi2 to vendor dependencies
+COPY tokenizers/Cargo.toml Cargo.toml
+COPY tokenizers/Cargo.lock Cargo.lock
 
 # Build libtokenizers from source using the git submodule
 # Use cachi2's vendored cargo dependencies from the root Cargo.toml/Cargo.lock
