@@ -1,7 +1,7 @@
 ---
 metadata:
   version: "1.0"
-artifacts:
+artifacts: []
   # tokenizers is now built from the git submodule (tokenizers/)
   # No tarball needed - the submodule is included in the source code
   # Rust and Cargo are installed from Red Hat repositories (UBI)
