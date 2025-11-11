@@ -26,24 +26,31 @@ RUN dnf install -y zeromq-devel rust cargo && \
 COPY go.mod go.mod
 COPY go.sum go.sum
 
+# Copy the Rust manifests (Cargo.toml and Cargo.lock) for cachi2 to vendor dependencies
+COPY Cargo.toml Cargo.toml
+COPY Cargo.lock Cargo.lock
+
 # Copy the go source
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
 # Build libtokenizers from source to comply with conforma requirements
-# Use source code and vendored dependencies from cachi2 for hermetic builds
+# Use source code from cachi2 for hermetic builds
+# Use cachi2's vendored cargo dependencies from the root Cargo.toml/Cargo.lock
+# Copy the root Cargo.toml and Cargo.lock to the tokenizers build directory
 # Rust will automatically detect and build for the container's architecture
 RUN mkdir -p lib && \
     mkdir -p /tmp/tokenizers-build && \
     cd /tmp/tokenizers-build && \
     tar -xzf /cachi2/output/deps/generic/tokenizers-v1.22.2.tar.gz --strip-components=1 && \
-    tar -xzf /cachi2/output/deps/generic/tokenizers-vendor-v1.22.2.tar.gz && \
+    cp /workspace/Cargo.toml . && \
+    cp /workspace/Cargo.lock . && \
     mkdir -p .cargo && \
     echo '[source.crates-io]' > .cargo/config.toml && \
     echo 'replace-with = "vendored-sources"' >> .cargo/config.toml && \
     echo '' >> .cargo/config.toml && \
     echo '[source.vendored-sources]' >> .cargo/config.toml && \
-    echo 'directory = "vendor"' >> .cargo/config.toml && \
+    echo 'directory = "/cachi2/output/deps/cargo"' >> .cargo/config.toml && \
     make build && \
     find target/release -name "libtokenizers.a" -type f | head -1 | xargs -I {} cp {} /workspace/lib/ && \
     ranlib /workspace/lib/*.a && \
