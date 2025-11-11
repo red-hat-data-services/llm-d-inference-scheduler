@@ -31,12 +31,19 @@ COPY cmd/ cmd/
 COPY pkg/ pkg/
 
 # Build libtokenizers from source to comply with conforma requirements
-# Use source code from cachi2 for hermetic builds
+# Use source code and vendored dependencies from cachi2 for hermetic builds
 # Rust will automatically detect and build for the container's architecture
 RUN mkdir -p lib && \
     mkdir -p /tmp/tokenizers-build && \
     cd /tmp/tokenizers-build && \
     tar -xzf /cachi2/output/deps/generic/tokenizers-v1.22.2.tar.gz --strip-components=1 && \
+    tar -xzf /cachi2/output/deps/generic/tokenizers-vendor-v1.22.2.tar.gz && \
+    mkdir -p .cargo && \
+    echo '[source.crates-io]' > .cargo/config.toml && \
+    echo 'replace-with = "vendored-sources"' >> .cargo/config.toml && \
+    echo '' >> .cargo/config.toml && \
+    echo '[source.vendored-sources]' >> .cargo/config.toml && \
+    echo 'directory = "vendor"' >> .cargo/config.toml && \
     make build && \
     find target/release -name "libtokenizers.a" -type f | head -1 | xargs -I {} cp {} /workspace/lib/ && \
     ranlib /workspace/lib/*.a && \
