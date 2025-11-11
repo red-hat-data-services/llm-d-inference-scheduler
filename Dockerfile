@@ -13,7 +13,8 @@ COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 # Install only packages not already in the base image (gcc-c++, libstdc++, etc. are already present)
 # zeromq-devel is available from Red Hat Enterprise Linux AI repository
 # Install Rust and Cargo from Red Hat repositories (conforma compliant)
-RUN dnf install -y zeromq-devel rust cargo git && \
+# Use --allowerasing to allow LLVM upgrade (Rust 1.88 requires LLVM 20.1, base image has 19.1)
+RUN dnf install -y --allowerasing zeromq-devel rust cargo git && \
     dnf clean all && \
     rustc --version && \
     cargo --version
