@@ -81,10 +81,7 @@ USER root
 # Copy Red Hat repository configuration for zeromq packages
 COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 
-RUN microdnf install -y dnf && \
-    dnf install -y zeromq && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf /var/lib/dnf
+RUN microdnf install -y zeromq
 
 USER 65532:65532
 
