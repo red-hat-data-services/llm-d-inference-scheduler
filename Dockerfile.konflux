@@ -34,14 +34,9 @@ COPY pkg/ pkg/
 # Copy the tokenizers submodule
 COPY tokenizers/ tokenizers/
 
-# Copy the Rust manifests (Cargo.toml and Cargo.lock) from the submodule for cachi2 to vendor dependencies
-COPY tokenizers/Cargo.toml Cargo.toml
-COPY tokenizers/Cargo.lock Cargo.lock
-
 # Build libtokenizers from source using the git submodule
-# Use cachi2's vendored cargo dependencies from the root Cargo.toml/Cargo.lock
+# Use cachi2's vendored cargo dependencies from the tokenizers submodule
 # Configure cargo to use vendored dependencies for hermetic builds
-# The tokenizers directory already has its own Cargo.toml and Cargo.lock, so we use those
 RUN mkdir -p lib && \
     cd tokenizers && \
     mkdir -p .cargo && \
