@@ -15,10 +15,11 @@ COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 # Install build tools including Rust for building libtokenizers from source
 # Install only packages not already in the base image (gcc-c++, libstdc++, etc. are already present)
 # zeromq-devel is available from Red Hat Enterprise Linux AI repository
-RUN dnf install -y zeromq-devel git && \
+RUN dnf install -y zeromq-devel && \
     dnf clean all && \
     # Install rustup to get Rust and Cargo (not available via dnf)
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    # Use rustup from cachi2 for hermetic builds
+    sh /cachi2/output/deps/generic/rustup-init.sh -y && \
     export PATH="/root/.cargo/bin:${PATH}"
 
 # Copy the Go Modules manifests
@@ -30,14 +31,13 @@ COPY cmd/ cmd/
 COPY pkg/ pkg/
 
 # Build libtokenizers from source to comply with conforma requirements
-# This replaces the GitHub download that was previously provided by cachi2
+# Use source code from cachi2 for hermetic builds
 # Rust will automatically detect and build for the container's architecture
-ARG TOKENIZER_VERSION=v1.22.2
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN mkdir -p lib && \
     mkdir -p /tmp/tokenizers-build && \
     cd /tmp/tokenizers-build && \
-    git clone --depth 1 --branch ${TOKENIZER_VERSION} https://github.com/daulet/tokenizers.git . && \
+    tar -xzf /cachi2/output/deps/generic/tokenizers-v1.22.2.tar.gz --strip-components=1 && \
     make build && \
     find target/release -name "libtokenizers.a" -type f | head -1 | xargs -I {} cp {} /workspace/lib/ && \
     ranlib /workspace/lib/*.a && \

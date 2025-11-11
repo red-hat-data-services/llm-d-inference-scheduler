@@ -1,15 +1,13 @@
 metadata:
   version: "1.0"
 artifacts:
-  - target: "libtokenizers.linux-amd64.tar.gz"
-    download_url: "https://github.com/daulet/tokenizers/releases/download/v1.22.2/libtokenizers.linux-amd64.tar.gz"
+  # rustup installer for building libtokenizers from source
+  - target: "rustup-init.sh"
+    download_url: "https://sh.rustup.rs"
     checksums:
-      sha256: "c5f6e6f63491c297d754bde0783c50a04df2b959907a87cb0c81ac7d3b6b4b63"
-  - target: "libtokenizers.linux-arm64.tar.gz"
-    download_url: "https://github.com/daulet/tokenizers/releases/download/v1.22.2/libtokenizers.linux-arm64.tar.gz"
+      sha256: "17247e4bcacf6027ec2e11c79a72c494c9af69ac8d1abcc1b271fa4375a106c2"
+  # tokenizers source code for building from source (conforma compliance)
+  - target: "tokenizers-v1.22.2.tar.gz"
+    download_url: "https://github.com/daulet/tokenizers/archive/refs/tags/v1.22.2.tar.gz"
     checksums:
-      sha256: "25c1678dba890f234079838620e1019951a45103526d08a61eacaa58f804e3d4"
-  - target: "epel-release-latest-9.noarch.rpm"
-    download_url: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
-    checksums:
-      sha256: "f37633d205b3af14ced35e858da38c6275b12b16f7e8d3f809af725c7077cec5"
+      sha256: "f00772f3f079c59c5c237464001a19609a4d5bf5588d7117c2deaf4318624e58"
