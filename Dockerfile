@@ -10,12 +10,14 @@ WORKDIR /workspace
 COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 
 # Install build tools including Rust for building libtokenizers from source
+# Install only packages not already in the base image (gcc-c++, libstdc++, etc. are already present)
 # zeromq-devel is available from Red Hat Enterprise Linux AI repository
-RUN dnf install -y --allowerasing gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig git && \
+# Install Rust and Cargo from Red Hat repositories (conforma compliant)
+# llvm-libs will be upgraded to satisfy Rust's dependency (tracked in lockfile)
+RUN dnf install -y zeromq-devel rust cargo git && \
     dnf clean all && \
-    # Install rustup to get Rust and Cargo (not available via dnf)
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    export PATH="/root/.cargo/bin:${PATH}"
+    rustc --version && \
+    cargo --version
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -29,7 +31,6 @@ COPY pkg/ pkg/
 # This replaces the GitHub download
 # Rust will automatically detect and build for the container's architecture
 ARG RELEASE_VERSION=v1.22.1
-ENV PATH="/root/.cargo/bin:${PATH}"
 RUN mkdir -p lib && \
     mkdir -p /tmp/tokenizers-build && \
     cd /tmp/tokenizers-build && \
@@ -65,10 +66,7 @@ USER root
 # Copy Red Hat repository configuration for zeromq packages
 COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 
-RUN microdnf install -y dnf && \
-    dnf install -y zeromq && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf /var/lib/dnf
+RUN microdnf install -y zeromq
 
 USER 65532:65532
 

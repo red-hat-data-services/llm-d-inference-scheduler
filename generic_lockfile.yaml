@@ -1,5 +1,9 @@
 metadata:
   version: "1.0"
-artifacts: []
-# libtokenizers is now built from source in Dockerfile/Dockerfile.konflux
-# EPEL packages have been removed - zeromq now comes from rhelai repository
+artifacts:
+  # tokenizers source code for building from source (conforma compliance)
+  # Rust and Cargo are now installed from Red Hat repositories (UBI)
+  - target: "tokenizers-v1.22.2.tar.gz"
+    download_url: "https://github.com/daulet/tokenizers/archive/refs/tags/v1.22.2.tar.gz"
+    checksums:
+      sha256: "f00772f3f079c59c5c237464001a19609a4d5bf5588d7117c2deaf4318624e58"

@@ -13,31 +13,44 @@ USER root
 COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 
 # Install build tools including Rust for building libtokenizers from source
-# commented as these packages are present in ubi9
-# RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
-RUN dnf install -y --allowerasing gcc-c++ libstdc++ libstdc++-devel zeromq-devel pkgconfig git && \
+# Install only packages not already in the base image (gcc-c++, libstdc++, etc. are already present)
+# zeromq-devel is available from Red Hat Enterprise Linux AI repository
+# Install Rust and Cargo from Red Hat repositories (conforma compliant)
+# llvm-libs will be upgraded to satisfy Rust's dependency (tracked in lockfile)
+RUN dnf install -y zeromq-devel rust cargo && \
     dnf clean all && \
-    # Install rustup to get Rust and Cargo (not available via dnf)
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    export PATH="/root/.cargo/bin:${PATH}"
+    rustc --version && \
+    cargo --version
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum
+
+# Copy the Rust manifests (Cargo.toml and Cargo.lock) for cachi2 to vendor dependencies
+COPY Cargo.toml Cargo.toml
+COPY Cargo.lock Cargo.lock
 
 # Copy the go source
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
 # Build libtokenizers from source to comply with conforma requirements
-# This replaces the GitHub download that was previously provided by cachi2
+# Use source code from cachi2 for hermetic builds
+# Use cachi2's vendored cargo dependencies from the root Cargo.toml/Cargo.lock
+# Copy the root Cargo.toml and Cargo.lock to the tokenizers build directory
 # Rust will automatically detect and build for the container's architecture
-ARG TOKENIZER_VERSION=v1.22.2
-ENV PATH="/root/.cargo/bin:${PATH}"
 RUN mkdir -p lib && \
     mkdir -p /tmp/tokenizers-build && \
     cd /tmp/tokenizers-build && \
-    git clone --depth 1 --branch ${TOKENIZER_VERSION} https://github.com/daulet/tokenizers.git . && \
+    tar -xzf /cachi2/output/deps/generic/tokenizers-v1.22.2.tar.gz --strip-components=1 && \
+    cp /workspace/Cargo.toml . && \
+    cp /workspace/Cargo.lock . && \
+    mkdir -p .cargo && \
+    echo '[source.crates-io]' > .cargo/config.toml && \
+    echo 'replace-with = "vendored-sources"' >> .cargo/config.toml && \
+    echo '' >> .cargo/config.toml && \
+    echo '[source.vendored-sources]' >> .cargo/config.toml && \
+    echo 'directory = "/cachi2/output/deps/cargo"' >> .cargo/config.toml && \
     make build && \
     find target/release -name "libtokenizers.a" -type f | head -1 | xargs -I {} cp {} /workspace/lib/ && \
     ranlib /workspace/lib/*.a && \
@@ -68,10 +81,7 @@ USER root
 # Copy Red Hat repository configuration for zeromq packages
 COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 
-RUN microdnf install -y dnf && \
-    dnf install -y zeromq && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf /var/lib/dnf
+RUN microdnf install -y zeromq
 
 USER 65532:65532
 
