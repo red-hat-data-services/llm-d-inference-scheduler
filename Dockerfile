@@ -11,7 +11,7 @@ COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 
 # Install build tools including Rust for building libtokenizers from source
 # zeromq-devel is available from Red Hat Enterprise Linux AI repository
-RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig git && \
+RUN dnf install -y --allowerasing gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig git && \
     dnf clean all && \
     # Install rustup to get Rust and Cargo (not available via dnf)
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
