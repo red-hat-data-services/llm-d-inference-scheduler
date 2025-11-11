@@ -9,7 +9,11 @@ packages:
   # Only list packages NOT already in the base image (ubi9/go-toolset already has gcc-c++, libstdc++, etc.)
   # zeromq packages are available from Red Hat Enterprise Linux AI repository
   # Rust and Cargo are available from UBI repositories
+  # llvm-libs is required by Rust 1.88 (needs LLVM 20.1, base image has 19.1)
+  # annobin needs to be upgraded to a version compatible with LLVM 20.1
   - zeromq
   - zeromq-devel
   - rust
   - cargo
+  - llvm-libs
+  - annobin

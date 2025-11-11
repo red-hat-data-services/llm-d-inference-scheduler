@@ -4,6 +4,13 @@ lockfileVendor: redhat
 arches:
 - arch: aarch64
   packages:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/a/annobin-12.98-1.el9.aarch64.rpm
+    repoid: ubi-9-for-aarch64-appstream-rpms
+    size: 1117109
+    checksum: sha256:9c64856a3b3e04136ab8b62b94fca93b6de87449ce1712c8f26c0af3ab69a9d4
+    name: annobin
+    evr: 12.98-1.el9
+    sourcerpm: annobin-12.98-1.el9.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/c/cargo-1.88.0-1.el9.aarch64.rpm
     repoid: ubi-9-for-aarch64-appstream-rpms
     size: 7738248
@@ -236,6 +243,12 @@ arches:
     evr: 4.3.5-1.el9ai
     sourcerpm: zeromq-4.3.5-1.el9ai.src.rpm
   source:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/source/SRPMS/Packages/a/annobin-12.98-1.el9.src.rpm
+    repoid: ubi-9-for-aarch64-appstream-source-rpms
+    size: 1012262
+    checksum: sha256:cc70662d5376afa8617a010844ec0a5aec13cd7ba4e8839ec0053b80c7876b93
+    name: annobin
+    evr: 12.98-1.el9
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/source/SRPMS/Packages/l/libmpc-1.2.1-4.el9.src.rpm
     repoid: ubi-9-for-aarch64-appstream-source-rpms
     size: 846236
@@ -311,6 +324,13 @@ arches:
   module_metadata: []
 - arch: x86_64
   packages:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/os/Packages/a/annobin-12.98-1.el9.x86_64.rpm
+    repoid: ubi-9-for-x86_64-appstream-rpms
+    size: 1117414
+    checksum: sha256:604af902dd8793f42ed3f30a9a6c78e2cebe74d4924479e8647b4d3224be328a
+    name: annobin
+    evr: 12.98-1.el9
+    sourcerpm: annobin-12.98-1.el9.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/os/Packages/c/cargo-1.88.0-1.el9.x86_64.rpm
     repoid: ubi-9-for-x86_64-appstream-rpms
     size: 8326606
@@ -536,6 +556,12 @@ arches:
     evr: 4.3.5-1.el9ai
     sourcerpm: zeromq-4.3.5-1.el9ai.src.rpm
   source:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/source/SRPMS/Packages/a/annobin-12.98-1.el9.src.rpm
+    repoid: ubi-9-for-x86_64-appstream-source-rpms
+    size: 1012262
+    checksum: sha256:cc70662d5376afa8617a010844ec0a5aec13cd7ba4e8839ec0053b80c7876b93
+    name: annobin
+    evr: 12.98-1.el9
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/source/SRPMS/Packages/l/libmpc-1.2.1-4.el9.src.rpm
     repoid: ubi-9-for-x86_64-appstream-source-rpms
     size: 846236
