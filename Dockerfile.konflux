@@ -41,10 +41,9 @@ COPY tokenizers/Cargo.lock Cargo.lock
 # Build libtokenizers from source using the git submodule
 # Use cachi2's vendored cargo dependencies from the root Cargo.toml/Cargo.lock
 # Configure cargo to use vendored dependencies for hermetic builds
+# The tokenizers directory already has its own Cargo.toml and Cargo.lock, so we use those
 RUN mkdir -p lib && \
     cd tokenizers && \
-    cp /workspace/Cargo.toml . && \
-    cp /workspace/Cargo.lock . && \
     mkdir -p .cargo && \
     echo '[source.crates-io]' > .cargo/config.toml && \
     echo 'replace-with = "vendored-sources"' >> .cargo/config.toml && \
