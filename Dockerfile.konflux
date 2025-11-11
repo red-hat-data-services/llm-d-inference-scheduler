@@ -9,12 +9,16 @@ USER root
 WORKDIR /workspace
 USER root
 
+# Copy Red Hat repository configuration for zeromq packages
+COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 
-# Install build tools
-# commented as these packages are present in ubi9
-# RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
-RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel zeromq-devel pkgconfig && \
-    dnf clean all
+# Install build tools including Rust for building libtokenizers from source
+# zeromq-devel is available from Red Hat Enterprise Linux AI repository
+RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel zeromq-devel pkgconfig git && \
+    dnf clean all && \
+    # Install rustup to get Rust and Cargo (not available via dnf)
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    export PATH="/root/.cargo/bin:${PATH}"
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -24,12 +28,20 @@ COPY go.sum go.sum
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
-RUN cp /cachi2/output/deps/generic/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz /workspace
-
-# HuggingFace tokenizer bindings
-RUN mkdir -p lib
-RUN tar -xz -f libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz -C lib
-RUN ranlib lib/*.a
+# Build libtokenizers from source to comply with conforma requirements
+# This replaces the GitHub download that was previously provided by cachi2
+# Rust will automatically detect and build for the container's architecture
+ARG TOKENIZER_VERSION=v1.22.2
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN mkdir -p lib && \
+    mkdir -p /tmp/tokenizers-build && \
+    cd /tmp/tokenizers-build && \
+    git clone --depth 1 --branch ${TOKENIZER_VERSION} https://github.com/daulet/tokenizers.git . && \
+    make build && \
+    find target/release -name "libtokenizers.a" -type f | head -1 | xargs -I {} cp {} /workspace/lib/ && \
+    ranlib /workspace/lib/*.a && \
+    cd /workspace && \
+    rm -rf /tmp/tokenizers-build
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
@@ -49,10 +61,16 @@ WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
 
 # Install zeromq runtime library needed by the manager.
-# The final image is UBI9, so we need epel-release-9.
+# zeromq is available from Red Hat Enterprise Linux AI repository
 USER root
 
-RUN microdnf install -y zeromq
+# Copy Red Hat repository configuration for zeromq packages
+COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
+
+RUN microdnf install -y dnf && \
+    dnf install -y zeromq && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf /var/lib/dnf
 
 USER 65532:65532
 
