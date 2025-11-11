@@ -8,5 +8,8 @@ contentOrigin:
 packages:
   # Only list packages NOT already in the base image (ubi9/go-toolset already has gcc-c++, libstdc++, etc.)
   # zeromq packages are available from Red Hat Enterprise Linux AI repository
+  # Rust and Cargo are available from UBI repositories
   - zeromq
   - zeromq-devel
+  - rust
+  - cargo

@@ -1,16 +1,8 @@
 metadata:
   version: "1.0"
 artifacts:
-  # Rust toolchain tarballs for building libtokenizers from source (architecture-specific)
-  - target: "rust-1.83.0-x86_64-unknown-linux-gnu.tar.xz"
-    download_url: "https://static.rust-lang.org/dist/rust-1.83.0-x86_64-unknown-linux-gnu.tar.xz"
-    checksums:
-      sha256: "b6467a0e8a6c5dca35269785c994e4d80d89754d6c600162cc9146f90c87ee08"
-  - target: "rust-1.83.0-aarch64-unknown-linux-gnu.tar.xz"
-    download_url: "https://static.rust-lang.org/dist/rust-1.83.0-aarch64-unknown-linux-gnu.tar.xz"
-    checksums:
-      sha256: "5f02e00bca65f6eebafe2ac6b1bbdecb5f160f260a9c2231a51ed8d382f0ada0"
   # tokenizers source code for building from source (conforma compliance)
+  # Rust and Cargo are now installed from Red Hat repositories (UBI)
   - target: "tokenizers-v1.22.2.tar.gz"
     download_url: "https://github.com/daulet/tokenizers/archive/refs/tags/v1.22.2.tar.gz"
     checksums:
