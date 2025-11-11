@@ -11,12 +11,11 @@ COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 
 # Install build tools including Rust for building libtokenizers from source
 # zeromq-devel is available from Red Hat Enterprise Linux AI repository
-RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig rust cargo git && \
+RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig git && \
     dnf clean all && \
-    # Install rustup for cross-compilation support
+    # Install rustup to get Rust and Cargo (not available via dnf)
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    export PATH="/root/.cargo/bin:${PATH}" && \
-    rustup default stable
+    export PATH="/root/.cargo/bin:${PATH}"
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -28,21 +27,15 @@ COPY pkg/ pkg/
 
 # Build libtokenizers from source to comply with conforma requirements
 # This replaces the GitHub download
+# Rust will automatically detect and build for the container's architecture
 ARG RELEASE_VERSION=v1.22.1
-# Map TARGETARCH to Rust target triple for cross-compilation
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN case "${TARGETARCH}" in \
-        amd64) RUST_TARGET="x86_64-unknown-linux-gnu" ;; \
-        arm64) RUST_TARGET="aarch64-unknown-linux-gnu" ;; \
-        *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
-    esac && \
-    rustup target add ${RUST_TARGET} && \
-    mkdir -p lib && \
+RUN mkdir -p lib && \
     mkdir -p /tmp/tokenizers-build && \
     cd /tmp/tokenizers-build && \
     git clone --depth 1 --branch ${RELEASE_VERSION} https://github.com/daulet/tokenizers.git . && \
-    CARGO_BUILD_TARGET=${RUST_TARGET} make build && \
-    find target/${RUST_TARGET}/release -name "libtokenizers.a" -type f | head -1 | xargs -I {} cp {} /workspace/lib/ && \
+    make build && \
+    find target/release -name "libtokenizers.a" -type f | head -1 | xargs -I {} cp {} /workspace/lib/ && \
     ranlib /workspace/lib/*.a && \
     cd /workspace && \
     rm -rf /tmp/tokenizers-build
