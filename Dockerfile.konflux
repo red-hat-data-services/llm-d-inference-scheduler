@@ -18,8 +18,14 @@ COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 RUN dnf install -y zeromq-devel && \
     dnf clean all && \
     # Install rustup to get Rust and Cargo (not available via dnf)
-    # Use rustup from cachi2 for hermetic builds
-    sh /cachi2/output/deps/generic/rustup-init.sh -y && \
+    # Use rustup binary from cachi2 for hermetic builds (architecture-specific)
+    case "${TARGETARCH}" in \
+        amd64) RUSTUP_BIN="rustup-init-x86_64" ;; \
+        arm64) RUSTUP_BIN="rustup-init-aarch64" ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    chmod +x /cachi2/output/deps/generic/${RUSTUP_BIN} && \
+    /cachi2/output/deps/generic/${RUSTUP_BIN} -y && \
     export PATH="/root/.cargo/bin:${PATH}"
 
 # Copy the Go Modules manifests
