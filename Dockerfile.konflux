@@ -15,18 +15,20 @@ COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 # Install build tools including Rust for building libtokenizers from source
 # Install only packages not already in the base image (gcc-c++, libstdc++, etc. are already present)
 # zeromq-devel is available from Red Hat Enterprise Linux AI repository
-RUN dnf install -y zeromq-devel && \
+RUN dnf install -y zeromq-devel xz && \
     dnf clean all && \
-    # Install rustup to get Rust and Cargo (not available via dnf)
-    # Use rustup binary from cachi2 for hermetic builds (architecture-specific)
+    # Install Rust toolchain directly from tarball (hermetic build, no rustup needed)
     case "${TARGETARCH}" in \
-        amd64) RUSTUP_BIN="rustup-init-x86_64" ;; \
-        arm64) RUSTUP_BIN="rustup-init-aarch64" ;; \
+        amd64) RUST_TARBALL="rust-1.83.0-x86_64-unknown-linux-gnu.tar.xz" ;; \
+        arm64) RUST_TARBALL="rust-1.83.0-aarch64-unknown-linux-gnu.tar.xz" ;; \
         *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    chmod +x /cachi2/output/deps/generic/${RUSTUP_BIN} && \
-    /cachi2/output/deps/generic/${RUSTUP_BIN} -y && \
-    export PATH="/root/.cargo/bin:${PATH}"
+    mkdir -p /opt/rust && \
+    tar -xJf /cachi2/output/deps/generic/${RUST_TARBALL} -C /opt/rust --strip-components=1 && \
+    /opt/rust/install.sh --prefix=/opt/rust --disable-ldconfig && \
+    export PATH="/opt/rust/bin:${PATH}" && \
+    rustc --version && \
+    cargo --version
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -39,7 +41,7 @@ COPY pkg/ pkg/
 # Build libtokenizers from source to comply with conforma requirements
 # Use source code from cachi2 for hermetic builds
 # Rust will automatically detect and build for the container's architecture
-ENV PATH="/root/.cargo/bin:${PATH}"
+ENV PATH="/opt/rust/bin:${PATH}"
 RUN mkdir -p lib && \
     mkdir -p /tmp/tokenizers-build && \
     cd /tmp/tokenizers-build && \
