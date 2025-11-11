@@ -23,13 +23,13 @@ API implementation must utilize [Envoy] and support [ext-proc], as this is the
 callback mechanism the EPP relies on to make routing decisions to model serving
 workloads currently.
 
-[Kubernetes]:https://kubernetes.io
-[Architecture Documentation]:docs/architecture.md
-[Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
-[P/D Disaggregation]:docs/dp.md
-[Gateway API]:https://github.com/kubernetes-sigs/gateway-api
-[Envoy]:https://github.com/envoyproxy/envoy
-[ext-proc]:https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter
+[Kubernetes]: https://kubernetes.io
+[Architecture Documentation]: docs/architecture.md
+[Gateway API Inference Extension (GIE)]: https://github.com/kubernetes-sigs/gateway-api-inference-extension
+[P/D Disaggregation]: docs/dp.md
+[Gateway API]: https://github.com/kubernetes-sigs/gateway-api
+[Envoy]: https://github.com/envoyproxy/envoy
+[ext-proc]: https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter
 
 ## Contributing
 
@@ -41,6 +41,9 @@ For large changes please [create an issue] first describing the change so the
 maintainers can do an assessment, and work on the details with you. See
 [DEVELOPMENT.md](DEVELOPMENT.md) for details on how to work with the codebase.
 
+For information on updating Rust dependencies used in Konflux builds, see
+[Docker-Konflux-Dependencies.md](Docker-Konflux-Dependencies.md).
+
 Note that in general features should go to the upstream [Gateway API Inference
 Extension (GIE)] project _first_ if applicable. The GIE is a major dependency of
 ours, and where most _general purpose_ inference features live. If you have
@@ -51,10 +54,10 @@ create a [discussion] or ask on [Slack].
 
 Contributions are welcome!
 
-[create an issue]:https://github.com/llm-d/llm-d-inference-scheduler/issues/new
-[Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
-[discussion]:https://github.com/llm-d/llm-d-inference-scheduler/discussions/new?category=q-a
-[Slack]:https://llm-d.slack.com/
-[Google Meet]:https://meet.google.com/uin-yncz-rvg
-[Meeting Notes]:https://docs.google.com/document/d/1Pf3x7ZM8nNpU56nt6CzePAOmFZ24NXDeXyaYb565Wq4
-[#sig-inference-scheduler]:https://llm-d.slack.com/?redir=%2Fmessages%2Fsig-inference-scheduler
+[create an issue]: https://github.com/llm-d/llm-d-inference-scheduler/issues/new
+[Gateway API Inference Extension (GIE)]: https://github.com/kubernetes-sigs/gateway-api-inference-extension
+[discussion]: https://github.com/llm-d/llm-d-inference-scheduler/discussions/new?category=q-a
+[Slack]: https://llm-d.slack.com/
+[Google Meet]: https://meet.google.com/uin-yncz-rvg
+[Meeting Notes]: https://docs.google.com/document/d/1Pf3x7ZM8nNpU56nt6CzePAOmFZ24NXDeXyaYb565Wq4
+[#sig-inference-scheduler]: https://llm-d.slack.com/?redir=%2Fmessages%2Fsig-inference-scheduler
