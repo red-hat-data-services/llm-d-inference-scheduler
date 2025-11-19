@@ -8,19 +8,22 @@ TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
 PROJECT_NAME ?= llm-d-inference-scheduler
 SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
+VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-sim
 SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
 export EPP_TAG
-IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
+export EPP_IMAGE ?= $(IMAGE_TAG_BASE):$(EPP_TAG)
 SIDECAR_TAG ?= dev
 export SIDECAR_TAG
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
-SIDECAR_IMG = $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
+export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 NAMESPACE ?= hc4ai-operator
 VLLM_SIMULATOR_TAG ?= v0.6.1
 export VLLM_SIMULATOR_TAG
+VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
+export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
 
 # Map go arch to typos arch
 ifeq ($(TARGETARCH),amd64)
@@ -57,8 +60,8 @@ BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
 SRC = $(shell find . -type f -name '*.go')
 
 # Internal variables for generic targets
-epp_IMAGE = $(IMG)
-sidecar_IMAGE = $(SIDECAR_IMG)
+epp_IMAGE = $(EPP_IMAGE)
+sidecar_IMAGE = $(SIDECAR_IMAGE)
 epp_NAME = epp
 sidecar_NAME = $(SIDECAR_NAME)
 epp_LDFLAGS = -ldflags="$(LDFLAGS)"
@@ -185,7 +188,7 @@ uninstall: uninstall-docker ## Default uninstall using Docker
 .PHONY: install-docker
 install-docker: check-container-tool ## Install app using $(CONTAINER_RUNTIME)
 	@echo "Starting container with $(CONTAINER_RUNTIME)..."
-	$(CONTAINER_RUNTIME) run -d --name $(PROJECT_NAME)-container $(IMG)
+	$(CONTAINER_RUNTIME) run -d --name $(PROJECT_NAME)-container $(EPP_IMAGE)
 	@echo "$(CONTAINER_RUNTIME) installation complete."
 	@echo "To use $(PROJECT_NAME), run:"
 	@echo "alias $(PROJECT_NAME)='$(CONTAINER_RUNTIME) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)'"
@@ -230,12 +233,12 @@ uninstall-k8s: check-kubectl check-kustomize check-envsubst ## Uninstall from Ku
 
 .PHONY: install-openshift
 install-openshift: check-kubectl check-kustomize check-envsubst ## Install on OpenShift
-	@echo $$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION
+	@echo $$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE
 	@echo "Creating namespace $(NAMESPACE)..."
 	kubectl create namespace $(NAMESPACE) 2>/dev/null || true
 	@echo "Deploying common resources from deploy/ ..."
 	# Build and substitute the base manifests from deploy, then apply them
-	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl apply -n $(NAMESPACE) -f -
+	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' | kubectl apply -n $(NAMESPACE) -f -
 	@echo "Waiting for pod to become ready..."
 	sleep 5
 	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
@@ -246,9 +249,9 @@ install-openshift: check-kubectl check-kustomize check-envsubst ## Install on Op
 .PHONY: uninstall-openshift
 uninstall-openshift: check-kubectl check-kustomize check-envsubst ## Uninstall from OpenShift
 	@echo "Removing resources from OpenShift..."
-	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl delete --force -f - || true
+	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' | kubectl delete --force -f - || true
 	# @if kubectl api-resources --api-group=route.openshift.io | grep -q Route; then \
-	#   envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' < deploy/openshift/route.yaml | kubectl delete --force -f - || true; \
+	#   envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' < deploy/openshift/route.yaml | kubectl delete --force -f - || true; \
 	# fi
 	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
 	echo "Deleting pod: $$POD"; \
@@ -260,18 +263,18 @@ uninstall-openshift: check-kubectl check-kustomize check-envsubst ## Uninstall f
 .PHONY: install-rbac
 install-rbac: check-kubectl check-kustomize check-envsubst ## Install RBAC
 	@echo "Applying RBAC configuration from deploy/rbac..."
-	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl apply -f -
+	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME' | kubectl apply -f -
 
 .PHONY: uninstall-rbac
 uninstall-rbac: check-kubectl check-kustomize check-envsubst ## Uninstall RBAC
 	@echo "Removing RBAC configuration from deploy/rbac..."
-	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl delete -f - || true
+	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME' | kubectl delete -f - || true
 
 ##@ Environment
 .PHONY: env
 env: ## Print environment variables
 	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
-	@echo "IMG=$(IMG)"
+	@echo "EPP_IMAGE=$(EPP_IMAGE)"
 	@echo "CONTAINER_RUNTIME=$(CONTAINER_RUNTIME)"
 
 .PHONY: check-typos
@@ -390,7 +393,9 @@ env-dev-kind: ## Run under kind ($(KIND_CLUSTER_NAME))
 		CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 		GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
 		IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
-		EPP_TAG=$(EPP_TAG) \
+		EPP_IMAGE=$(EPP_IMAGE) \
+		VLLM_SIMULATOR_IMAGE=${VLLM_SIMULATOR_IMAGE} \
+		SIDECAR_IMAGE=${SIDECAR_IMAGE} \
 		./scripts/kind-dev-env.sh; \
 	fi
 
