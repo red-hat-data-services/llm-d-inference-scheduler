@@ -1,16 +1,7 @@
 ---
 metadata:
   version: "1.0"
-artifacts:
-  - filename: "libtokenizers.linux-amd64.tar.gz"
-    download_url: "https://github.com/daulet/tokenizers/releases/download/v1.20.2/libtokenizers.linux-amd64.tar.gz"
-    checksum: sha256:af0f391646c54255b4e522dc81514ee238bcce3a949a6d35b18076175f6c7a4e
-  - filename: "libtokenizers.linux-arm64.tar.gz"
-    download_url: "https://github.com/daulet/tokenizers/releases/download/v1.20.2/libtokenizers.linux-arm64.tar.gz"
-    checksum: sha256:6acaab6c03c34166e97fe551292193bf26a7de0bef673cbec3a0e47c513ff02f
-  - filename: "epel-release-latest-8.noarch.rpm"
-    download_url: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm"
-    checksum: sha256:b2ad52c14a403045e37ffd65c18283e03e656dc9c6088865f4acdb8835b165c8
-  - filename: "epel-release-latest-9.noarch.rpm"
-    download_url: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
-    checksum: sha256:f37633d205b3af14ced35e858da38c6275b12b16f7e8d3f809af725c7077cec5
+artifacts: []
+  # tokenizers is now built from the git submodule (tokenizers/)
+  # No tarball needed - the submodule is included in the source code
+  # Rust and Cargo are installed from Red Hat repositories (UBI)
