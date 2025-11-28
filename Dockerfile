@@ -4,11 +4,19 @@ ARG TARGETOS
 ARG TARGETARCH
 USER root 
 
-# Install build tools
-# The builder is based on UBI8, so we need epel-release-8.
-RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
-    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig && \
-    dnf clean all
+# Copy Red Hat repository configuration for zeromq packages
+COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
+
+# Install build tools including Rust for building libtokenizers from source
+# Install only packages not already in the base image (gcc-c++, libstdc++, etc. are already present)
+# zeromq-devel is available from Red Hat Enterprise Linux AI repository
+# Install Rust and Cargo from Red Hat repositories (conforma compliant)
+# llvm-libs will be upgraded to satisfy Rust's dependency (tracked in lockfile)
+# annobin needs to be upgraded to a version compatible with LLVM 20.1
+RUN dnf install -y zeromq-devel rust cargo llvm-libs annobin && \
+    dnf clean all && \
+    rustc --version && \
+    cargo --version
 
 WORKDIR /workspace
 
@@ -20,10 +28,17 @@ COPY go.sum go.sum
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
-# HuggingFace tokenizer bindings
-RUN mkdir -p lib
-RUN curl -L https://github.com/daulet/tokenizers/releases/download/v1.20.2/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -C lib
-RUN ranlib lib/*.a
+# Copy the tokenizers submodule
+COPY tokenizers/ tokenizers/
+
+# Build libtokenizers from source using the git submodule
+# This replaces the GitHub download and ensures we build from a specific commit
+RUN mkdir -p lib && \
+    cd tokenizers && \
+    cargo build --release && \
+    find target/release -name "libtokenizers.a" -type f | head -1 | xargs -I {} cp {} /workspace/lib/ && \
+    ranlib /workspace/lib/*.a && \
+    cd /workspace
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
@@ -33,7 +48,9 @@ RUN ranlib lib/*.a
 ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
-RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go
+ARG COMMIT_SHA=unknown
+ARG BUILD_REF
+RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib' -X sigs.k8s.io/gateway-api-inference-extension/version.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/version.BuildRef=${BUILD_REF}" cmd/epp/main.go
 
 # Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
@@ -42,11 +59,15 @@ WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
 
 # Install zeromq runtime library needed by the manager.
-# The final image is UBI9, so we need epel-release-9.
+# zeromq is available from Red Hat Enterprise Linux AI repository
 USER root
-RUN microdnf install -y dnf && \
-    dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
-    dnf install -y zeromq
+
+# Copy Red Hat repository configuration for zeromq packages
+COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
+
+RUN microdnf install -y zeromq && \
+    microdnf clean all && \
+    rm -rf /var/cache/dnf /var/lib/dnf
 
 USER 65532:65532
 
