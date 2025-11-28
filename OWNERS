@@ -1,17 +1,34 @@
 approvers:
-- elevran
-- kfirtoledo
-- kfswain
-- nilig
-- nirrozenbaum
-- shmuelk
-- vMaroon
-
+  - andresllh
+  - bartoszmajsak
+  - brettmthompson
+  - danielezonca
+  - hdefazio
+  - israel-hdez
+  - Jooho
+  - mholder6
+  - mwaykole
+  - pierDipi
+  - RH-steve-grubb
+  - rpancham
+  - rnetser
+  - spolti
+  - terrytangyuan
+  - vaibhavjainwiz
+  - VedantMahabaleshwarkar
+  - vivekk16
 reviewers:
-- elevran
-- kfirtoledo
-- kfswain
-- nilig
-- nirrozenbaum
-- shmuelk
-- vMaroon
+  - andresllh
+  - bartoszmajsak
+  - brettmthompson
+  - hdefazio
+  - israel-hdez
+  - Jooho
+  - mholder6
+  - mwaykole
+  - pierDipi
+  - rnetser
+  - spolti
+  - terrytangyuan
+  - VedantMahabaleshwarkar
+  - vivekk16

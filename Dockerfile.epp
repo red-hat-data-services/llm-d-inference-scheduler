@@ -1,13 +1,13 @@
 ## Minimal runtime Dockerfile (microdnf-only, no torch, wrapper in site-packages)
 # Build Stage: using Go 1.24 image
-FROM quay.io/projectquay/golang:1.24 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.24 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
 
 # Install build tools
 # The builder is based on UBI8, so we need epel-release-8.
-RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
+RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
     dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig python3.12-devel python3.12-pip git && \
     dnf clean all
 # python3.12-devel needed for CGO compilation (Python headers and python3.12-config for linker flags)
