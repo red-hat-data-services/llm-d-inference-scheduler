@@ -29,7 +29,7 @@ spec:
     - '{{target_branch}}-{{revision}}'
   - name: additional-labels
     value:
-    - version=v2.25.0
+    - version=v2.25.1
     - io.openshift.tags=odh-llm-d-inference-scheduler
   - name: output-image
     value: quay.io/rhoai/odh-llm-d-inference-scheduler-rhel9:{{target_branch}}
@@ -43,7 +43,6 @@ spec:
     value: |
       [{"type": "gomod", "path": "."},
        {"path": ".", "type": "generic"},
-       {"type": "cargo", "path": "tokenizers"},
        {"path": ".", "type": "rpm", "include_summary_in_sbom": true}]
   - name: build-source-image
     value: true
