@@ -5,6 +5,8 @@ FROM registry.access.redhat.com/ubi9/go-toolset:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
+USER root
+
 # Install build tools
 # The builder is based on UBI8, so we need epel-release-8.
 RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
@@ -28,9 +30,9 @@ RUN go mod download
 # Extract version dynamically and copy to a known location
 RUN KVCACHE_MANAGER_VERSION=$(go list -m -f '{{.Version}}' github.com/llm-d/llm-d-kv-cache-manager) && \
     mkdir -p /workspace/kv-cache-manager-wrapper && \
-    cp /go/pkg/mod/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/render_jinja_template_wrapper.py \
+    cp $(go env GOMODCACHE)/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/render_jinja_template_wrapper.py \
        /workspace/kv-cache-manager-wrapper/ && \
-    cp /go/pkg/mod/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt \
+    cp $(go env GOMODCACHE)/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt \
        /workspace/kv-cache-manager-wrapper/requirements.txt
 
 # HuggingFace tokenizer bindings (static lib)

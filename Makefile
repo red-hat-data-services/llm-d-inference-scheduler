@@ -81,6 +81,8 @@ ifeq ($(PYTHON_CONFIG),)
 	endif
 endif
 
+# Check if PYTHON_CONFIG is found before using it
+ifneq ($(PYTHON_CONFIG),)
 ifneq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
 	PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
 	# Use --ldflags --embed to get all necessary flags for linking
@@ -88,10 +90,17 @@ ifneq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
 else
 	$(error ${PYTHON_ERROR})
 endif
+else
+	$(error ${PYTHON_ERROR})
+endif
 
 # CGO flags with all dependencies
 CGO_CFLAGS := $(PYTHON_CFLAGS) '-I$(shell pwd)/lib'
 CGO_LDFLAGS := $(PYTHON_LDFLAGS) $(PYTHON_LIBS) '-L$(shell pwd)/lib' -ltokenizers -ldl -lm
+
+# Export CGO flags as environment variables for all targets
+export CGO_CFLAGS
+export CGO_LDFLAGS
 
 # Internal variables for generic targets
 epp_IMAGE = $(EPP_IMAGE)
