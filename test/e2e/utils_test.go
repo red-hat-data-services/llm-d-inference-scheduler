@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -12,116 +11,43 @@ import (
 	"github.com/onsi/gomega/gexec"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
-	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apilabels "k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
-	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 
-func createObjsFromYaml(docs []string) []string {
-	objNames := []string{}
+const (
+	deploymentKind = "deployment"
+)
 
-	// For each doc, decode and create
-	decoder := serializer.NewCodecFactory(scheme).UniversalDeserializer()
-	for _, doc := range docs {
-		trimmed := strings.TrimSpace(doc)
-		if trimmed == "" {
-			continue
-		}
-		// Decode into a runtime.Object
-		obj, gvk, decodeErr := decoder.Decode([]byte(trimmed), nil, nil)
-		gomega.Expect(decodeErr).NotTo(gomega.HaveOccurred(),
-			"Failed to decode YAML document to a Kubernetes object")
+func scaleDeployment(objects []string, increment int) {
+	direction := "up"
+	absIncrement := increment
+	if increment < 0 {
+		direction = "down"
+		absIncrement = -increment
+	}
 
-		ginkgo.By(fmt.Sprintf("Decoded GVK: %s", gvk))
+	for _, kindAndName := range objects {
+		split := strings.Split(kindAndName, "/")
+		if strings.ToLower(split[0]) == deploymentKind {
+			ginkgo.By(fmt.Sprintf("Scaling the deployment %s %s by %d", split[1], direction, absIncrement))
+			scale, err := testConfig.KubeCli.AppsV1().Deployments(nsName).GetScale(testConfig.Context, split[1], v1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		unstrObj, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			// Fallback if it's a typed object
-			unstrObj = &unstructured.Unstructured{}
-			// Convert typed to unstructured
-			err := scheme.Convert(obj, unstrObj, nil)
+			scale.Spec.Replicas += int32(increment)
+			_, err = testConfig.KubeCli.AppsV1().Deployments(nsName).UpdateScale(testConfig.Context, split[1], scale, v1.UpdateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}
-
-		unstrObj.SetNamespace(nsName)
-		kind := unstrObj.GetKind()
-		name := unstrObj.GetName()
-		objNames = append(objNames, kind+"/"+name)
-
-		// Create the object
-		err := k8sClient.Create(ctx, unstrObj, &client.CreateOptions{})
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-			"Failed to create object from YAML")
-
-		// Wait for the created object to exist.
-		clientObj := getClientObject(kind)
-		testutils.EventuallyExists(ctx, func() error {
-			return k8sClient.Get(ctx, types.NamespacedName{Namespace: nsName, Name: name}, clientObj)
-		}, existsTimeout, interval)
-
-		switch kind {
-		case "CustomResourceDefinition":
-			// Wait for the CRD to be established.
-			testutils.CRDEstablished(ctx, k8sClient, clientObj.(*apiextv1.CustomResourceDefinition),
-				readyTimeout, interval)
-		case "Deployment":
-			// Wait for the deployment to be available.
-			testutils.DeploymentAvailable(ctx, k8sClient, clientObj.(*appsv1.Deployment),
-				modelReadyTimeout, interval)
-		}
 	}
-	return objNames
-}
-
-func deleteObjects(kindAndNames []string) {
-	for _, kindAndName := range kindAndNames {
-		split := strings.Split(kindAndName, "/")
-		clientObj := getClientObject(split[0])
-		err := k8sClient.Get(ctx, types.NamespacedName{Namespace: nsName, Name: split[1]}, clientObj)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		err = k8sClient.Delete(ctx, clientObj)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		gomega.Eventually(func() bool {
-			clientObj := getClientObject(split[0])
-			err := k8sClient.Get(ctx, types.NamespacedName{Namespace: nsName, Name: split[1]}, clientObj)
-			return apierrors.IsNotFound(err)
-		}, existsTimeout, interval).Should(gomega.BeTrue())
-	}
-}
-
-func getClientObject(kind string) client.Object {
-	switch strings.ToLower(kind) {
-	case "configmap":
-		return &corev1.ConfigMap{}
-	case "customresourcedefinition":
-		return &apiextv1.CustomResourceDefinition{}
-	case "deployment":
-		return &appsv1.Deployment{}
-	case "inferencepool":
-		return &v1alpha2.InferencePool{}
-	case "role":
-		return &rbacv1.Role{}
-	case "rolebinding":
-		return &rbacv1.RoleBinding{}
-	case "service":
-		return &corev1.Service{}
-	case "serviceaccount":
-		return &corev1.ServiceAccount{}
-	default:
-		ginkgo.Fail("unsupported K8S kind "+kind, 1)
-		return nil
-	}
+	podsInDeploymentsReady(objects)
 }
 
 // getModelServerPods Returns the list of Prefill and Decode vLLM pods separately
 func getModelServerPods(podLabels, prefillLabels, decodeLabels map[string]string) ([]string, []string) {
+	ginkgo.By("Getting Model server pods")
+
 	pods := getPods(podLabels)
 
 	prefillValidator, err := apilabels.ValidatedSelectorFromSet(prefillLabels)
@@ -160,7 +86,7 @@ func getModelServerPods(podLabels, prefillLabels, decodeLabels map[string]string
 func getPods(labels map[string]string) []corev1.Pod {
 	podList := corev1.PodList{}
 	selector := apilabels.SelectorFromSet(labels)
-	err := k8sClient.List(ctx, &podList, &client.ListOptions{LabelSelector: selector})
+	err := testConfig.K8sClient.List(testConfig.Context, &podList, &client.ListOptions{LabelSelector: selector})
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
 	pods := []corev1.Pod{}
@@ -174,16 +100,22 @@ func getPods(labels map[string]string) []corev1.Pod {
 }
 
 func podsInDeploymentsReady(objects []string) {
-	var deployment appsv1.Deployment
-	helper := func(deploymentName string) bool {
-		err := k8sClient.Get(ctx, types.NamespacedName{Namespace: nsName, Name: deploymentName}, &deployment)
-		return err == nil && deployment.Status.Replicas == deployment.Status.ReadyReplicas
+	isDeploymentReady := func(deploymentName string) bool {
+		var deployment appsv1.Deployment
+		err := testConfig.K8sClient.Get(testConfig.Context, types.NamespacedName{Namespace: nsName, Name: deploymentName}, &deployment)
+		ginkgo.By(fmt.Sprintf("Waiting for deployment %q to be ready (err: %v): replicas=%#v, status=%#v", deploymentName, err, *deployment.Spec.Replicas, deployment.Status))
+		return err == nil && *deployment.Spec.Replicas == deployment.Status.Replicas &&
+			deployment.Status.Replicas == deployment.Status.ReadyReplicas
 	}
+
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")
-		if strings.ToLower(split[0]) == "deployment" {
-			ginkgo.By(fmt.Sprintf("Waiting for pods of %s to be ready", split[1]))
-			gomega.Eventually(helper, readyTimeout, interval).WithArguments(split[1]).Should(gomega.BeTrue())
+		if strings.ToLower(split[0]) == deploymentKind {
+			gomega.Eventually(isDeploymentReady).
+				WithArguments(split[1]).
+				WithPolling(interval).
+				WithTimeout(readyTimeout).
+				Should(gomega.BeTrue())
 		}
 	}
 }
@@ -194,22 +126,6 @@ func runKustomize(kustomizeDir string) []string {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 	return strings.Split(string(session.Out.Contents()), "\n---")
-}
-
-// applyYAMLFile reads a file containing YAML (possibly multiple docs)
-// and applies each object to the cluster.
-func applyYAMLFile(filePath string) {
-	// Create the resources from the manifest file
-	createObjsFromYaml(readYaml(filePath))
-}
-
-func readYaml(filePath string) []string {
-	ginkgo.By("Reading YAML file: " + filePath)
-	yamlBytes, err := os.ReadFile(filePath)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-	// Split multiple docs, if needed
-	return strings.Split(string(yamlBytes), "\n---")
 }
 
 func substituteMany(inputs []string, substitutions map[string]string) []string {

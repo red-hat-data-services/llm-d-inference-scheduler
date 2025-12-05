@@ -12,11 +12,30 @@ the llm-d inference framework.
 
 This provides an "Endpoint Picker (EPP)" component to the llm-d inference
 framework which schedules incoming inference requests to the platform via a
-[Kubernetes] Gateway according to scheduler plugins. For more details on the llm-d inference scheduler architecture, routing logic, and different plugins (filters and scorers), including plugin configuration, see the [Architecture Documentation]).
+[Kubernetes] Gateway according to scheduler plugins. For more details on the
+llm-d inference scheduler architecture, routing logic, and different plugins
+(filters and scorers), including plugin configuration, see the [Architecture Documentation]).
+
+### Relation to GIE (IGW)
 
 The EPP extends the [Gateway API Inference Extension (GIE)] project,
 which provides the API resources and machinery for scheduling. We add some
 custom features that are specific to llm-d here, such as [P/D Disaggregation].
+The two projects collaborate closely as often a feature in llm-d might require
+enablement and extensions in the GIE code base.
+Unique and experimental features may start in llm-d and migrate, over time, to
+GIE. As a project goal, we prefer to upstream functionality to GIE when
+- it has matured sufficiently and has proven wide applicability and usefulness; and
+- it can be implemented in EPP alone (i.e., llm-d provides a full inference framework,
+  beyond scheduling).
+
+Note that in general features should go to the upstream [Gateway API Inference
+Extension (GIE)] project _first_ if applicable. The GIE is a major dependency of
+ours, and where most _general purpose_ inference features live. If you have
+something that you feel is general purpose or use, it probably should go to the
+GIE. If you have something that's _llm-d specific_ then it should go here. If
+you're not sure whether your feature belongs here or in the GIE, feel free to
+create a [discussion] or ask on [Slack].
 
 A compatible [Gateway API] implementation is used as the Gateway. The Gateway
 API implementation must utilize [Envoy] and support [ext-proc], as this is the
@@ -26,28 +45,20 @@ workloads currently.
 [Kubernetes]:https://kubernetes.io
 [Architecture Documentation]:docs/architecture.md
 [Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
-[P/D Disaggregation]:docs/dp.md
+[P/D Disaggregation]:docs/disagg_pd.md
 [Gateway API]:https://github.com/kubernetes-sigs/gateway-api
 [Envoy]:https://github.com/envoyproxy/envoy
 [ext-proc]:https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter
 
 ## Contributing
 
-Our community meeting is weekly at Wednesday 10AM PDT ([Google Meet], [Meeting Notes]).
+Our community meeting is bi-weekly at Wednesday 10AM PDT ([Google Meet], [Meeting Notes]).
 
 We currently utilize the [#sig-inference-scheduler] channel in llm-d Slack workspace for communications.
 
 For large changes please [create an issue] first describing the change so the
 maintainers can do an assessment, and work on the details with you. See
 [DEVELOPMENT.md](DEVELOPMENT.md) for details on how to work with the codebase.
-
-Note that in general features should go to the upstream [Gateway API Inference
-Extension (GIE)] project _first_ if applicable. The GIE is a major dependency of
-ours, and where most _general purpose_ inference features live. If you have
-something that you feel is general purpose or use, it probably should go to the
-GIE. If you have something that's _llm-d specific_ then it should go here. If
-you're not sure whether your feature belongs here or in the GIE, feel free to
-create a [discussion] or ask on [Slack].
 
 Contributions are welcome!
 
