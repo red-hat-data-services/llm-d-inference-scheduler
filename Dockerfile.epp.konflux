@@ -4,6 +4,7 @@ FROM registry.redhat.io/ubi9/go-toolset:1.24@sha256:6234f572204d672a0ee0686d748f
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG REVISION
 USER root
 
 WORKDIR /workspace
@@ -18,7 +19,7 @@ COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 # Install Rust and Cargo from Red Hat repositories (conforma compliant)
 # llvm-libs will be upgraded to satisfy Rust's dependency (tracked in lockfile)
 # annobin needs to be upgraded to a version compatible with LLVM 20.1
-RUN dnf install -y zeromq-devel rust cargo llvm-libs annobin && \
+RUN dnf install -y zeromq-devel rust cargo llvm-libs annobin pkgconfig python3.12-devel python3.12-pip && \
     dnf clean all && \
     rustc --version && \
     cargo --version
@@ -33,6 +34,15 @@ COPY pkg/ pkg/
 
 # Copy the tokenizers submodule
 COPY tokenizers/ tokenizers/
+
+# Copy Python wrapper and requirements from kv-cache-manager dependency
+# Extract version dynamically and copy to a known location
+RUN KVCACHE_MANAGER_VERSION=$(go list -m -f '{{.Version}}' github.com/llm-d/llm-d-kv-cache-manager) && \
+    mkdir -p /workspace/kv-cache-manager-wrapper && \
+    cp $(go env GOMODCACHE)/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/render_jinja_template_wrapper.py \
+       /workspace/kv-cache-manager-wrapper/ && \
+    cp $(go env GOMODCACHE)/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt \
+       /workspace/kv-cache-manager-wrapper/requirements.txt
 
 # Build libtokenizers from source using the git submodule
 # Use cachi2's vendored cargo dependencies from the tokenizers submodule
@@ -58,7 +68,12 @@ RUN mkdir -p lib && \
 ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
-RUN go build -mod=mod -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib -ltokenizers'" cmd/epp/main.go
+ENV PYTHON=python3.12
+ENV PYTHONPATH=/usr/lib64/python3.12/site-packages:/usr/lib/python3.12/site-packages
+
+RUN export CGO_CFLAGS="$(python3.12-config --cflags) -I/workspace/lib" && \
+    export CGO_LDFLAGS="$(python3.12-config --ldflags --embed) -L/workspace/lib -ltokenizers -ldl -lm" && \
+    go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib -ltokenizers' -X sigs.k8s.io/gateway-api-inference-extension/version.CommitSHA=${REVISION} -X sigs.k8s.io/gateway-api-inference-extension/version.BuildRef=${REVISION}" cmd/epp/main.go
 
 # Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
@@ -71,7 +86,25 @@ COPY --from=builder /workspace/bin/epp /app/epp
 # The final image is UBI9, so we need epel-release-9.
 USER root
 
-RUN microdnf install -y zeromq
+RUN microdnf install -y zeromq python3.12 python3.12-libs python3.12-pip
+
+# Install wrapper as a module in site-packages
+RUN mkdir -p /usr/local/lib/python3.12/site-packages/
+COPY --from=builder /workspace/kv-cache-manager-wrapper/render_jinja_template_wrapper.py /usr/local/lib/python3.12/site-packages/
+
+# Python deps (no cache, single target) – filter out torch
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+COPY --from=builder /workspace/kv-cache-manager-wrapper/requirements.txt /tmp/requirements.txt
+RUN sed '/^torch\b/d' /tmp/requirements.txt > /tmp/requirements.notorch.txt && \
+    python3.12 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    python3.12 -m pip install --no-cache-dir --target /usr/local/lib/python3.12/site-packages -r /tmp/requirements.notorch.txt && \
+    python3.12 -m pip install --no-cache-dir --target /usr/local/lib/python3.12/site-packages PyYAML && \
+    rm /tmp/requirements.txt /tmp/requirements.notorch.txt && \
+    rm -rf /root/.cache/pip
+
+ENV PYTHONPATH="/usr/local/lib/python3.12/site-packages:/usr/lib/python3.12/site-packages"
+ENV PYTHON=python3.12
+ENV PATH=/usr/bin:/usr/local/bin:$PATH
 
 USER 65532:65532
 

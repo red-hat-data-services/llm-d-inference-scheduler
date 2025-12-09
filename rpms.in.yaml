@@ -17,3 +17,7 @@ packages:
   - cargo
   - llvm-libs
   - annobin
+  - python3.12-devel
+  - python3.12-pip
+  - python3.12-libs
+  - pkgconfig
