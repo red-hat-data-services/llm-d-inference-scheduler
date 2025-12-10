@@ -463,6 +463,19 @@ clean-env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
 
 ##@ Dependencies
 
+.PHONY: generate-requirements
+generate-requirements: ## Copy requirements.txt from kv-cache-manager to root for hermetic pip caching
+	@echo "Copying requirements.txt from kv-cache-manager..."
+	@KVCACHE_MANAGER_VERSION=$$(go list -m -f '{{.Version}}' github.com/llm-d/llm-d-kv-cache-manager) && \
+	cp $$(go env GOMODCACHE)/github.com/llm-d/llm-d-kv-cache-manager@$${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt requirements.in && \
+	echo "✅ requirements.in copied to root directory"
+	echo "wheel==0.45.1" >> requirements.in
+	echo "PyYAML==6.0.3" >> requirements.in
+	sed -i '/--extra-index-url/d' requirements.in # Unsupported in Konflux
+	sed -i '/torch/d' requirements.in 			  # Unnecessary
+	pip-compile -o requirements.txt requirements.in
+	pybuild-deps compile -o build-requirements.txt requirements.txt
+
 .PHONY: check-dependencies
 check-dependencies: ## Check if development dependencies are installed
 	@if [ "$(TARGETOS)" = "linux" ]; then \

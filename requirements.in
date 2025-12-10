@@ -1,0 +1,7 @@
+
+packaging==24.2
+pillow==11.2.1
+transformers>=4.53.0
+jinja2>=2.11
+wheel==0.45.1
+PyYAML==6.0.3

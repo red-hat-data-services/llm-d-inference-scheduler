@@ -32,6 +32,8 @@ COPY go.sum go.sum
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
+RUN go mod download
+
 # Copy the tokenizers submodule
 COPY tokenizers/ tokenizers/
 
