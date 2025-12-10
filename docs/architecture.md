@@ -223,6 +223,51 @@ Filters out pods using a standard Kubernetes label selector.
 - **Parameters**: A standard Kubernetes label selector.
   - `matchLabels`: map of `{key,value}` pairs. If more than one pair are in the map, all of the keys are checked and the results are combined with AND logic.
 
+Example configuration with the above parameters set:
+
+```yaml
+plugins:
+  - type: by-label-selector
+    parameters:
+      matchLabels:
+        inference-role: decode
+        hardware-type: H100
+```
+
+In this example:
+- Only pods that have **both** labels  
+  `inference-role=decode` **and** `hardware-type=H100`  
+  will be selected.
+- Pods missing either label, or having a different value (e.g., `inference-role=prefill`), are **filtered out**.
+- The matching logic follows standard Kubernetes label selector semantics: all key-value pairs in `matchLabels` must match (**AND** logic).
+
+---
+
+#### ByLabel
+
+Filters out pods that do not have a specific label with one of the allowed values. Pods missing the label are either filtered out or retained based on the `allowsNoLabel` setting.
+
+- **Type**: `by-label`  
+- **Parameters**:
+  - `label` (string, required): The name of the Kubernetes label to inspect on each pod.
+  - `validValues` (list of strings, required unless `allowsNoLabel=true`): A list of acceptable label values. A pod is kept if its label value matches any entry in this list.
+  - `allowsNoLabel` (boolean, optional, default: `false`): If `true`, pods that **do not have the specified label at all** will be **included** in the candidate set. If `false` (default), such pods are filtered out.
+
+Example configuration with the above parameters set:
+
+```yaml
+plugins:
+  - type: by-label
+    parameters:
+      label: "inference-role"
+      validValues: ["decode", "both"]
+      allowsNoLabel: false
+```
+
+In this example:
+- Only pods labeled for decoding (`inference-role=decode`) or supporting both stages (`inference-role=both`) are selected.
+- Pods missing the `inference-role` label are not considered for decode scheduling.
+
 ---
 
 #### DecodeFilter
@@ -285,7 +330,8 @@ plugins:
           blockSize: 64
           hashSeed: "12345"
       tokenizersPoolConfig:
-        huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
+        hf:
+          huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
       kvBlockIndexConfig:
         enableMetrics: true
 ```
@@ -314,8 +360,9 @@ plugins:
             enableMetrics: true
           tokenizersPoolConfig:
             workersCount: 8
-            huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
-            tokenizersCacheDir: /tmp/tokenizers
+            hf:
+              huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
+              tokenizersCacheDir: /tmp/tokenizers
 ```
 
 ---
@@ -361,6 +408,57 @@ used for the same session.
 
 - **Type**: `session-affinity-scorer`
 - **Parameters**: None
+
+---
+
+#### NoHitLRUScorer
+
+Scores pods based on least recently used (LRU) ordering for cold requests (requests with no KV cache hits).
+This helps evenly distribute cache growth across pods, since cold requests result in new KV blocks being created.
+
+The scorer integrates with a prefix cache plugin to determine if a request has cache hits:
+- For cold requests (no cache hits): Ranks pods by LRU order, with never-used or least recently used pods
+  receiving higher scores (up to 1.0) and most recently used pods receiving lower scores (approaching 0.0)
+- For warm requests (cache hits): Returns neutral scores (0.5) for all pods to avoid interfering with
+  cache locality optimization
+
+The LRU tracking is specific to cold requests only - pods are added to the LRU cache when they serve
+a cold request, not when they serve requests with cache hits.
+
+- **Type**: `no-hit-lru-scorer`
+- **Parameters**:
+  - `prefixPluginName` (optional): The name of the prefix cache plugin to read state from. Defaults to `prefix-cache-scorer`.
+  - `lruSize` (optional): The maximum number of pods to track in the LRU cache. Defaults to 1024.
+
+Example configuration:
+
+```yaml
+plugins:
+  - type: prefix-cache-scorer
+    parameters:
+      hashBlockSize: 5
+      maxPrefixBlocksToMatch: 256
+      lruCapacityPerServer: 31250
+  - type: no-hit-lru-scorer
+    parameters:
+      lruSize: 2048
+  - type: decode-filter
+  - type: max-score-picker
+  - type: single-profile-handler
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: decode-filter
+      - pluginRef: max-score-picker
+      - pluginRef: prefix-cache-scorer
+        weight: 2
+      - pluginRef: no-hit-lru-scorer
+        weight: 1
+```
+
+**Note:** This scorer is designed to work alongside a prefix cache scorer (such as `prefix-cache-scorer` or
+`precise-prefix-cache-scorer`). If no prefix cache state is available, all requests are treated as cold.
+When integrating with a prefix-cache scorer, the prefix-cache scorer should be defined first in the scheduling profile.
 
 ---
 
@@ -430,7 +528,7 @@ The **vLLM sidecar** handles orchestration between Prefill and Decode stages. It
 - Local memory management
 - Experimental protocol compatibility
 
-> **Note**: The detailed P/D design is available in this document: [Disaggregated Prefill/Decode in llm-d](./dp.md)
+> **Note**: The detailed P/D design is available in this document: [Disaggregated Prefill/Decode in llm-d](./disagg_pd.md)
 
 ---
 
