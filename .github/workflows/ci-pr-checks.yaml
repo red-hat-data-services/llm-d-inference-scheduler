@@ -1,18 +1,36 @@
 name: CI - PR Checks
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
-      - dev
       - main
 
 jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            docs:
+              - 'README.md'
+              - 'docs/**'
   lint-and-test:
+    needs: check-changes
+    if: ${{ needs.check-changes.outputs.docs == 'false' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v5
-        
+        uses: actions/checkout@v6
+
       - name: Sanity check repo contents
         run: ls -la
 
@@ -20,15 +38,21 @@ jobs:
         run: sed -En 's/^go (.*)$/GO_VERSION=\1/p' go.mod >> $GITHUB_ENV
 
       - name: Set up Go with cache
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "${{ env.GO_VERSION }}"
           cache-dependency-path: ./go.sum
 
-      - name: Install libzmq dependencies (kvcache/kvevents)
+      - name: Install dependencies
+        run: sudo make install-dependencies
+
+      - name: Configure CGO for Python
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libzmq3-dev pkg-config
+          PYTHON_INCLUDE=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
+          echo "CPATH=${PYTHON_INCLUDE}:${CPATH}" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "CGO_CFLAGS=$(python3-config --cflags --embed)" >> $GITHUB_ENV
+          echo "CGO_LDFLAGS=$(python3-config --ldflags --embed)" >> $GITHUB_ENV
 
       - name: Set PKG_CONFIG_PATH
         run: echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig" >> $GITHUB_ENV
@@ -37,17 +61,23 @@ jobs:
         run: go mod tidy
 
       - name: Run lint checks
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: 'v2.1.6'
           args: "--config=./.golangci.yml"
-
-      - name: Run make test
-        shell: bash 
-        run: |
-          make test
+        env:
+          CGO_ENABLED: ${{ env.CGO_ENABLED }}
+          CGO_CFLAGS: ${{ env.CGO_CFLAGS }}
+          CGO_LDFLAGS: ${{ env.CGO_LDFLAGS }}
+          CPATH: ${{ env.CPATH }}
+          PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
 
       - name: Run make build
         shell: bash
         run: |
           make build
+
+      - name: Run make test
+        shell: bash
+        run: |
+          make test
