@@ -10,12 +10,12 @@ metadata:
     pipelinesascode.tekton.dev/on-cel-expression: |
       event == "push"
       && target_branch == "rhoai-3.2"
-      && ( !".tekton/**".pathChanged() || ".tekton/odh-llm-d-inference-scheduler-v3-2-push.yaml".pathChanged() )
+      && ( !".tekton/**".pathChanged() || ".tekton/odh-llm-d-routing-sidecar-v3-2-push.yaml".pathChanged() )
   labels:
     appstudio.openshift.io/application: rhoai-v3-2
-    appstudio.openshift.io/component: odh-llm-d-inference-scheduler-v3-2
+    appstudio.openshift.io/component: odh-llm-d-routing-sidecar-v3-2
     pipelines.appstudio.openshift.io/type: build
-  name: odh-llm-d-inference-scheduler-v3-2-on-push
+  name: odh-llm-d-routing-sidecar-v3-2-on-push
   namespace: rhoai-tenant
 spec:
   params:
@@ -29,54 +29,18 @@ spec:
   - name: additional-labels
     value:
     - version=v3.2.0
-    - io.openshift.tags=odh-llm-d-inference-scheduler
+    - io.openshift.tags=odh-llm-d-routing-sidecar
   - name: output-image
-    value: quay.io/rhoai/odh-llm-d-inference-scheduler-rhel9:{{target_branch}}
+    value: quay.io/rhoai/odh-llm-d-routing-sidecar-rhel9:{{target_branch}}
   - name: dockerfile
-    value: Dockerfile.epp.konflux
+    value: Dockerfile.sidecar.konflux
   - name: path-context
     value: .
   - name: hermetic
     value: true
   - name: prefetch-input
     value: |
-      [
-        {
-            "type": "gomod",
-            "path": "."
-        },
-        {
-            "type": "generic",
-            "path": "."
-        },
-        {
-            "type": "rpm",
-            "path": ".",
-            "include_summary_in_sbom": true,
-            "options": {
-                "dnf": {
-                    "epel": {
-                        "gpgcheck": "0"
-                    }
-                }
-            }
-        },
-        {
-            "type": "cargo",
-            "path": "tokenizers"
-        },
-        {
-            "type": "pip",
-            "path": ".",
-            "requirements_files": [
-                "requirements.txt"
-            ],
-            "requirements_build_files": [
-                "build-requirements.txt"
-            ],
-            "allow_binary": "true"
-        }
-      ]
+      {"type": "gomod", "path": "."}
   - name: build-source-image
     value: true
   - name: build-image-index
@@ -95,7 +59,7 @@ spec:
     - name: pathInRepo
       value: pipelines/multi-arch-container-build.yaml
   taskRunTemplate:
-    serviceAccountName: build-pipeline-odh-llm-d-inference-scheduler-v3-2
+    serviceAccountName: build-pipeline-odh-llm-d-routing-sidecar-v3-2
   workspaces:
   - name: git-auth
     secret:
