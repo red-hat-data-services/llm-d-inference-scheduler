@@ -27,8 +27,22 @@ RUN dnf install -y zeromq-devel rust cargo llvm-libs annobin && \
 COPY go.mod go.mod
 COPY go.sum go.sum
 
-# The toolchain go1.24.11 in go.mod will cause Go to download 1.24.11 when building to fix CVE-2025-61729
-ENV GOTOOLCHAIN=auto
+# Extract prefetched Go 1.24.11 binary for the target architecture
+# This fixes CVE-2025-61729 by using go1.24.11 as specified in go.mod toolchain
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+      tar -C /usr/local -xzf /cachi2/output/deps/generic/go1.24.11.linux-amd64.tar.gz; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+      tar -C /usr/local -xzf /cachi2/output/deps/generic/go1.24.11.linux-arm64.tar.gz; \
+    else \
+      echo "Unsupported architecture: $TARGETARCH" && exit 1; \
+    fi && \
+    /usr/local/go/bin/go version
+
+# Use the prefetched Go 1.24.11 toolchain
+ENV PATH=/usr/local/go/bin:$PATH
+ENV GOTOOLCHAIN=local
+
+# Download Go module dependencies using Go 1.24.11
 RUN go mod download
 
 # Copy the go source
