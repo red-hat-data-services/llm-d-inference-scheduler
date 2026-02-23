@@ -47,16 +47,13 @@ RUN KVCACHE_MANAGER_VERSION=$(go list -m -f '{{.Version}}' github.com/llm-d/llm-
        /workspace/kv-cache-manager-wrapper/requirements.txt
 
 # Build libtokenizers from source using the git submodule
-# Use cachi2's vendored cargo dependencies from the tokenizers submodule
-# Configure cargo to use vendored dependencies for hermetic builds
+# cachi2 configures Cargo vendored sources in two places that conflict:
+#   1. globally via cachi2.env (source "local")
+#   2. locally via tokenizers/.cargo/config.toml (source "vendored-sources")
+# Remove the local config so only the global cachi2 config is used.
 RUN mkdir -p lib && \
     cd tokenizers && \
-    mkdir -p .cargo && \
-    echo '[source.crates-io]' > .cargo/config.toml && \
-    echo 'replace-with = "vendored-sources"' >> .cargo/config.toml && \
-    echo '' >> .cargo/config.toml && \
-    echo '[source.vendored-sources]' >> .cargo/config.toml && \
-    echo 'directory = "/cachi2/output/deps/cargo"' >> .cargo/config.toml && \
+    rm -f .cargo/config.toml && \
     cargo build --release && \
     find target/release -name "libtokenizers.a" -type f | head -1 | xargs -I {} cp {} /workspace/lib/ && \
     ranlib /workspace/lib/*.a && \
