@@ -15,7 +15,7 @@ USER root
 WORKDIR /workspace
 
 # Install ZMQ development libraries (required for CGO)
-# The builder is based on UBI8, so we need epel-release-9
+# The builder is based on UBI9, so we need epel-release-9
 RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
     dnf install -y zeromq-devel pkgconfig && \
     dnf clean all
@@ -61,3 +61,11 @@ EXPOSE 9090
 EXPOSE 5557
 
 ENTRYPOINT ["/app/epp"]
+
+
+LABEL com.redhat.component="odh-llm-d-inference-scheduler" \
+      name="odh-llm-d-inference-scheduler" \
+      description="odh-llm-d-inference-scheduler" \
+      summary="odh-llm-d-inference-scheduler" \
+      io.k8s.display-name="odh-llm-d-inference-scheduler" \
+      io.k8s.description="odh-llm-d-inference-scheduler"
