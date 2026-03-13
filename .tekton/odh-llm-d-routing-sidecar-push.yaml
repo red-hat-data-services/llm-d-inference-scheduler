@@ -7,14 +7,14 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     build.appstudio.redhat.com/pull_request_number: "{{pull_request_number}}"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-comment: "^/build-epp"
+    pipelinesascode.tekton.dev/on-comment: "^/build-sidecar"
     pipelinesascode.tekton.dev/on-event: "[pull_request]"
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
   labels:
     appstudio.openshift.io/application: automation
     appstudio.openshift.io/component: pull-request-pipelines
     pipelines.appstudio.openshift.io/type: build
-  name: odh-llm-d-inference-scheduler-{{target_branch}}-on-pull-request-86795
+  name: odh-llm-d-routing-sidecar-{{target_branch}}-on-pull-request-23461
   namespace: rhoai-tenant
 spec:
   params:
@@ -28,54 +28,18 @@ spec:
   - name: additional-labels
     value:
     - version=on-pr-{{revision}}
-    - io.openshift.tags=odh-llm-d-inference-scheduler
+    - io.openshift.tags=odh-llm-d-routing-sidecar
   - name: output-image
-    value: quay.io/rhoai/pull-request-pipelines:odh-llm-d-inference-scheduler-{{revision}}
+    value: quay.io/rhoai/pull-request-pipelines:odh-llm-d-routing-sidecar-{{revision}}
   - name: dockerfile
-    value: Dockerfile.epp.konflux
+    value: Dockerfile.sidecar.konflux
   - name: path-context
     value: .
   - name: hermetic
     value: true
   - name: prefetch-input
     value: |
-      [
-        {
-            "type": "gomod",
-            "path": "."
-        },
-        {
-            "type": "generic",
-            "path": "."
-        },
-        {
-            "type": "rpm",
-            "path": ".",
-            "include_summary_in_sbom": true,
-            "options": {
-                "dnf": {
-                    "epel": {
-                        "gpgcheck": "0"
-                    }
-                }
-            }
-        },
-        {
-            "type": "cargo",
-            "path": "tokenizers"
-        },
-        {
-            "type": "pip",
-            "path": ".",
-            "requirements_files": [
-                "requirements.txt"
-            ],
-            "requirements_build_files": [
-                "build-requirements.txt"
-            ],
-            "allow_binary": "true"
-        }
-      ]
+      {"type": "gomod", "path": "."}
   - name: build-source-image
     value: true
   - name: build-image-index
