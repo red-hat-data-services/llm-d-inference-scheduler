@@ -9,6 +9,7 @@ Documentation for developing the inference scheduler.
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
 - [Kustomize]
+- [ZeroMQ]
 
 [Make]:https://www.gnu.org/software/make/
 [Golang]:https://go.dev/
@@ -16,6 +17,26 @@ Documentation for developing the inference scheduler.
 [Podman]:https://podman.io/
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind
 [Kustomize]:https://kubectl.docs.kubernetes.io/installation/kustomize/
+[ZeroMQ]:https://zeromq.org/
+
+> [!NOTE]
+> **Python is NOT required** as of v0.5.1. Tokenization is handled by a separate UDS (Unix Domain Socket) tokenizer sidecar container. Previous versions (< v0.5.1) used embedded Python tokenizers with daulet/tokenizers bindings, but these are now deprecated.
+
+## Tokenization Architecture
+
+The project uses **UDS (Unix Domain Socket)** tokenization. Tokenization is handled by a separate UDS tokenizer sidecar container, not by the EPP container itself. Previous embedded tokenizer approaches (daulet/tokenizers, direct Python/vLLM linking) are deprecated and no longer used.
+
+**Building the UDS tokenizer image:**
+
+```bash
+make image-build-uds-tokenizer
+```
+
+The image is tagged as `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` by default. Override with:
+
+```bash
+UDS_TOKENIZER_TAG=v1.0.0 make image-build-uds-tokenizer
+```
 
 ## Kind Development Environment
 
@@ -190,14 +211,14 @@ kubectl config set-context --current --namespace="${NAMESPACE}"
 export HF_TOKEN="<HF_TOKEN>"
 ```
 
-Download the `llm-d-kv-cache-manager` repository (the installation script and Helm chart to install the vLLM environment):
+Download the `llm-d-kv-cache` repository (the installation script and Helm chart to install the vLLM environment):
 
 ```bash
-cd .. && git clone git@github.com:llm-d/llm-d-kv-cache-manager.git
+cd .. && git clone git@github.com:llm-d/llm-d-kv-cache.git
 ```
 
 If you prefer to clone it into the `/tmp` directory, make sure to update the `VLLM_CHART_DIR` environment variable:
-`export VLLM_CHART_DIR=<tmp_dir>/llm-d-kv-cache-manager/vllm-setup-helm`
+`export VLLM_CHART_DIR=<tmp_dir>/llm-d-kv-cache/vllm-setup-helm`
 
 Once all this is set up, you can deploy the environment:
 
@@ -219,7 +240,7 @@ And making requests with `curl`:
 
 ```bash
 curl -s -w '\n' http://localhost:8080/v1/completions -H 'Content-Type: application/json' \
-  -d '{"model":"meta-llama/Llama-3.1-8B-Instruct","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
 > [!NOTE]
@@ -227,14 +248,17 @@ curl -s -w '\n' http://localhost:8080/v1/completions -H 'Content-Type: applicati
 
 #### Environment Configurateion
 
-**1. Setting the EPP image and tag:**
+**1. Setting the EPP image registry and tag:**
 
-You can optionally set a custom EPP image (otherwise, the default will be used):
+You can optionally set a custom image registry and tag (otherwise, defaults will be used):
 
 ```bash
+export IMAGE_REGISTRY="<YOUR_REGISTRY>"
 export EPP_TAG="<YOUR_TAG>"
-export EPP_IMAGE="<YOUR_REGISTRY>/<YOUR_IMAGE>"
 ```
+
+> [!NOTE]
+> The full image reference will be constructed as `${EPP_IMAGE}`, where `EPP_IMAGE` defaults to `${IMAGE_REGISTRY}/llm-d-inference-scheduler:{EPP_TAG}`. For example, with `IMAGE_REGISTRY=quay.io/<my-id>` and `EPP_TAG=v1.0.0`, the final image will be `quay.io/<my-id>/llm-d-inference-scheduler:v1.0.0`.
 
 **2. Setting the vLLM replicas:**
 

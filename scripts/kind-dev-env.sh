@@ -37,7 +37,7 @@ EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
 export EPP_IMAGE
 
 # Set the model name to deploy
-export MODEL_NAME="${MODEL_NAME:-food-review}"
+export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
 # Extract model family (e.g., "meta-llama" from "meta-llama/Llama-3.1-8B-Instruct")
 export MODEL_FAMILY="${MODEL_NAME%%/*}"
 # Extract model ID (e.g., "Llama-3.1-8B-Instruct")
@@ -54,6 +54,13 @@ export SIDECAR_TAG="${SIDECAR_TAG:-dev}"
 # Set a default SIDECAR_IMAGE if not provided
 SIDECAR_IMAGE="${SIDECAR_IMAGE:-${IMAGE_REGISTRY}/llm-d-routing-sidecar:${SIDECAR_TAG}}"
 export SIDECAR_IMAGE
+
+# Set the default UDS tokenizer image tag
+export UDS_TOKENIZER_TAG="${UDS_TOKENIZER_TAG:-dev}"
+
+# Set a default UDS_TOKENIZER_IMAGE if not provided
+UDS_TOKENIZER_IMAGE="${UDS_TOKENIZER_IMAGE:-${IMAGE_REGISTRY}/llm-d-uds-tokenizer:${UDS_TOKENIZER_TAG}}"
+export UDS_TOKENIZER_IMAGE
 
 # Set the inference pool name for the deployment
 export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
@@ -74,31 +81,40 @@ export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
 # Data Parallel size
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
 
-PRIMARY_PORT="0"
-if [ "${PD_ENABLED}" != "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
-  if [ "${KV_CACHE_ENABLED}" != "true" ]; then
-    DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
-  else
-    DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
-  fi
-else
-  if [ "${KV_CACHE_ENABLED}" != "true" ]; then
-    if [ "${PD_ENABLED}" == "\"true\"" ]; then
-      DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
-      if [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-        PRIMARY_PORT="8000"
-      fi
-    else
-      DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
-    fi
-  else
+# Validate configuration constraints
+if [ "${KV_CACHE_ENABLED}" == "true" ]; then
+  # KV cache requires simple mode: no PD and DP size must be 1
+  if [ "${PD_ENABLED}" == "\"true\"" ] || [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
     echo "Invalid configuration: PD_ENABLED=true and KV_CACHE_ENABLED=true is not supported"
     exit 1
   fi
 fi
 
-export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
+# Set PRIMARY_PORT based on PD mode with data parallelism
+if [ "${PD_ENABLED}" == "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
+  PRIMARY_PORT="8000"
+else
+  PRIMARY_PORT="0"
+fi
 export PRIMARY_PORT
+
+# Determine EPP config file based on feature flags
+if [ "${KV_CACHE_ENABLED}" == "true" ]; then
+  # KV cache mode (simple mode only)
+  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
+elif [ "${PD_ENABLED}" == "\"true\"" ]; then
+  # Prefill-Decode mode
+  DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
+elif [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
+  # Data Parallel mode (only needed for Istio pre-1.28.1)
+  # Not really called in kind(docker.io/istio/pilot:1.28.1) by "make env-dev-kind"
+  DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
+else
+  # Simple mode
+  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
+fi
+
+export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
 
 # ------------------------------------------------------------------------------
 # Setup & Requirement Checks
@@ -179,14 +195,16 @@ kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Rea
 # Load Container Images
 # ------------------------------------------------------------------------------
 
-# Load the vllm simulator image into the cluster
-if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${VLLM_SIMULATOR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-else
-	if docker image inspect "${VLLM_SIMULATOR_IMAGE}" > /dev/null 2>&1; then
-		echo "INFO: Loading image into KIND cluster..."
-		kind --name ${CLUSTER_NAME} load docker-image ${VLLM_SIMULATOR_IMAGE}
-	fi
+# Load the vllm simulator image into the cluster (only if it's a locally built image)
+if [ -n "$(${CONTAINER_RUNTIME} images -q "${VLLM_SIMULATOR_IMAGE}")" ]; then
+    if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
+        podman save ${VLLM_SIMULATOR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+    else
+        if docker image inspect "${VLLM_SIMULATOR_IMAGE}" > /dev/null 2>&1; then
+            echo "INFO: Loading image into KIND cluster..."
+            kind --name ${CLUSTER_NAME} load docker-image ${VLLM_SIMULATOR_IMAGE}
+        fi
+    fi
 fi
 
 # Load the ext_proc endpoint-picker image into the cluster
@@ -201,6 +219,13 @@ if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
 	podman save ${SIDECAR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
 else
 	kind --name ${CLUSTER_NAME} load docker-image ${SIDECAR_IMAGE}
+fi
+
+# Load the UDS tokenizer image into the cluster
+if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
+	podman save ${UDS_TOKENIZER_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+else
+	kind --name ${CLUSTER_NAME} load docker-image ${UDS_TOKENIZER_IMAGE}
 fi
 
 # ------------------------------------------------------------------------------
@@ -237,7 +262,7 @@ kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-co
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
-  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${TARGET_PORTS} \
+  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
