@@ -58,7 +58,7 @@ spec:
                 "gpgcheck": "0"
               }
             }
-          }       
+          }
         }
       ]
   - name: build-source-image
