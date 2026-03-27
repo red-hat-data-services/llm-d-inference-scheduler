@@ -31,12 +31,44 @@ spec:
     value: Dockerfile.epp.konflux
   - name: path-context
     value: .
-  pipelineSpec:
-    description: |
-      This pipeline is ideal for building multi-arch container images from a Containerfile while maintaining trust after pipeline customization.
-
-      _Uses `buildah` to create a multi-platform container image leveraging [trusted artifacts](https://konflux-ci.dev/architecture/ADR/0036-trusted-artifacts.html). It also optionally creates a source image and runs some build-time tests. This pipeline requires that the [multi platform controller](https://github.com/konflux-ci/multi-platform-controller) is deployed and configured on your Konflux instance. Information is shared between tasks using OCI artifacts instead of PVCs. EC will pass the [`trusted_task.trusted`](https://conforma.dev/docs/policy/packages/release_trusted_task.html#trusted_task__trusted) policy as long as all data used to build the artifact is generated from trusted tasks.
-      This pipeline is pushed as a Tekton bundle to [quay.io](https://quay.io/repository/konflux-ci/tekton-catalog/pipeline-docker-build-multi-platform-oci-ta?tab=tags)_
+  - name: hermetic
+    value: true
+  - name: prefetch-input
+    value: |
+      [
+        {
+          "type": "gomod",
+          "path": "."
+        },
+        {
+          "type": "generic",
+          "path": "."
+        },
+        {
+          "type": "rpm",
+          "path": ".",
+          "include_summary_in_sbom": true,
+          "options": {
+            "dnf": {
+              "epel": {
+                "gpgcheck": "0"
+              }
+            }
+          }
+        }
+      ]
+  - name: build-source-image
+    value: true
+  - name: build-image-index
+    value: true
+  - name: build-platforms
+    value:
+    - linux/x86_64
+    - linux-m2xlarge/arm64
+  - name: rhel-subscription-activation-key
+    value: "rhel-subscription-activation-key-nonexistent"
+  pipelineRef:
+    resolver: git
     params:
     - description: Source Repository URL
       name: git-url
