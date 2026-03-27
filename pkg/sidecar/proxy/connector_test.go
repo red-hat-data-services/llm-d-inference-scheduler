@@ -44,7 +44,7 @@ type sidecarTestInfo struct {
 	proxy          *Server
 }
 
-var connectors = []string{ConnectorLMCache, ConnectorNIXLV2}
+var connectors = []string{ConnectorSharedStorage, ConnectorNIXLV2}
 
 var _ = Describe("Common Connector tests", func() {
 
@@ -59,7 +59,7 @@ var _ = Describe("Common Connector tests", func() {
 					defer GinkgoRecover()
 
 					validator := &AllowlistValidator{enabled: false}
-					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+					err := testInfo.proxy.Start(testInfo.ctx, validator)
 					Expect(err).ToNot(HaveOccurred())
 
 					testInfo.stoppedCh <- struct{}{}
@@ -121,7 +121,7 @@ var _ = Describe("Common Connector tests", func() {
 					defer GinkgoRecover()
 
 					validator := &AllowlistValidator{enabled: false}
-					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+					err := testInfo.proxy.Start(testInfo.ctx, validator)
 					Expect(err).ToNot(HaveOccurred())
 
 					testInfo.stoppedCh <- struct{}{}
