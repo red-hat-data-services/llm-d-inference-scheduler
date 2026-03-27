@@ -46,6 +46,12 @@ const (
 	requestFieldRemotePort          = "remote_port"
 	requestFieldStream              = "stream"
 	requestFieldStreamOptions       = "stream_options"
+	requestFieldCacheHitThreshold   = "cache_hit_threshold"
+
+	responseFieldChoices      = "choices"
+	responseFieldFinishReason = "finish_reason"
+
+	finishReasonCacheThreshold = "cache_threshold"
 
 	// SGLang bootstrap fields
 	requestFieldBootstrapHost = "bootstrap_host"
@@ -55,8 +61,8 @@ const (
 	// ConnectorNIXLV2 enables the P/D NIXL v2 protocol
 	ConnectorNIXLV2 = "nixlv2"
 
-	// ConnectorLMCache enables (now deprecated) P/D LMCache protocol
-	ConnectorLMCache = "lmcache"
+	// ConnectorSharedStorage enables (now deprecated) P/D Shared Storage protocol
+	ConnectorSharedStorage = "shared-storage"
 
 	// ConnectorSGLang enables SGLang P/D disaggregation protocol
 	ConnectorSGLang = "sglang"
@@ -87,6 +93,11 @@ type Config struct {
 	// EnablePrefillerSampling configures the proxy to randomly choose from the set
 	// of provided prefill hosts instead of always using the first one.
 	EnablePrefillerSampling bool
+
+	// CertPath is the path to TLS certificates for the sidecar server.
+	CertPath string
+	// SecureServing enables TLS for the sidecar server.
+	SecureServing bool
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)
@@ -137,7 +148,7 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 }
 
 // Start the HTTP reverse proxy.
-func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistValidator *AllowlistValidator) error {
+func (s *Server) Start(ctx context.Context, allowlistValidator *AllowlistValidator) error {
 	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.port)
 
 	s.allowlistValidator = allowlistValidator
@@ -146,12 +157,12 @@ func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistVali
 	s.handler = s.createRoutes()
 
 	grp, ctx := errgroup.WithContext(ctx)
-	if err := s.startDataParallel(ctx, cert, grp); err != nil {
+	if err := s.startDataParallel(ctx, grp); err != nil {
 		return err
 	}
 
 	grp.Go(func() error {
-		return s.startHTTP(ctx, cert)
+		return s.startHTTP(ctx)
 	})
 
 	return grp.Wait()
@@ -171,14 +182,16 @@ func (s *Server) Clone() *Server {
 		prefillerProxies:     s.prefillerProxies,
 		dataParallelProxies:  s.dataParallelProxies,
 		forwardDataParallel:  s.forwardDataParallel,
+		prefillSamplerFn:     s.prefillSamplerFn,
+		config:               s.config,
 	}
 }
 
 func (s *Server) setConnector() {
 
 	switch s.config.Connector {
-	case ConnectorLMCache:
-		s.runConnectorProtocol = s.runLMCacheProtocol
+	case ConnectorSharedStorage:
+		s.runConnectorProtocol = s.runSharedStorageProtocol
 	case ConnectorSGLang:
 		s.runConnectorProtocol = s.runSGLangProtocol
 	case ConnectorNIXLV2:
