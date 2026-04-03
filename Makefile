@@ -46,6 +46,10 @@ ifeq ($(TARGETOS),darwin)
 		TYPOS_TARGET_ARCH = x86_64
 	else ifeq ($(TARGETARCH),arm64)
 		TYPOS_TARGET_ARCH = aarch64
+	else ifeq ($(TARGETARCH),s390x)
+	        TYPOS_TARGET_ARCH = s390x
+	else ifeq ($(TARGETARCH),ppc64le)
+                TYPOS_TARGET_ARCH = ppc64le
 	else
 		TYPOS_TARGET_ARCH = $(TARGETARCH)
 	endif
@@ -56,6 +60,10 @@ else
 		TYPOS_TARGET_ARCH = x86_64
 	else ifeq ($(TARGETARCH),arm64)
 		TYPOS_TARGET_ARCH = aarch64
+	else ifeq ($(TARGETARCH),s390x)
+                TYPOS_TARGET_ARCH = s390x
+	else ifeq ($(TARGETARCH),ppc64le)
+                TYPOS_TARGET_ARCH = ppc64le
 	else
 		TYPOS_TARGET_ARCH = $(TARGETARCH)
 	endif
@@ -66,7 +74,7 @@ endif
 CONTAINER_RUNTIME := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
 export CONTAINER_RUNTIME
 BUILDER := $(shell command -v buildah >/dev/null 2>&1 && echo buildah || echo $(CONTAINER_RUNTIME))
-PLATFORMS ?= linux/amd64 # linux/arm64 # linux/s390x,linux/ppc64le
+PLATFORMS ?= linux/amd64,linux/s390x,linux/ppc64le
 
 GIT_COMMIT_SHA ?= "$(shell git rev-parse HEAD 2>/dev/null)"
 BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
