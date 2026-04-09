@@ -19,6 +19,7 @@ COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 # llvm-libs will be upgraded to satisfy Rust's dependency (tracked in lockfile)
 # annobin needs to be upgraded to a version compatible with LLVM 20.1
 RUN dnf install -y zeromq-devel rust cargo llvm-libs annobin && \
+    dnf upgrade -y python3-urllib3 && \
     dnf clean all && \
     rustc --version && \
     cargo --version
