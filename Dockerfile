@@ -1,4 +1,4 @@
-# Build Stage: using Go 1.24 image
+# Build Stage: using Go 1.25.8 image
 FROM registry.access.redhat.com/ubi9/go-toolset:9.7@sha256:a5c9eaea7dd305d0c79a0ff5c620c1c7a0cff87335684ae216205faca70458f3 AS builder
 ARG TARGETOS
 ARG TARGETARCH
