@@ -4,6 +4,57 @@
 ## Tokenization is handled by a separate UDS tokenizer sidecar container
 ##
 ## CGO is still required for ZMQ (kvevents) but Python/vLLM dependencies are removed
+# EPEL packages build from source stage
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7 AS epel-base
+
+RUN microdnf install -y gcc-toolset-14 libtool make automake jq \
+    zlib-devel sqlite-devel ncurses-devel bzip2-devel openssl-devel \
+    tk-devel libpcap-devel xz-devel libffi-devel
+
+# Build & Install Python2
+RUN \
+    curl -L https://www.python.org/ftp/python/2.7.2/Python-2.7.2.tgz | tar xvz && \
+    cd Python-2.7.2 && \
+    source /opt/rh/gcc-toolset-14/enable && \
+    ./configure && make -j $(nproc) && make altinstall && \
+    ln -sf /usr/local/bin/python2.7 /usr/bin/python
+
+# zeromq-devel
+RUN \
+    ZMQ_LATEST_VERSION=$(curl -s "https://api.github.com/repos/zeromq/libzmq/releases/latest" | jq -r '.tag_name' | sed 's/v//') && \
+    curl -L https://github.com/zeromq/libzmq/releases/download/v${ZMQ_LATEST_VERSION}/zeromq-${ZMQ_LATEST_VERSION}.tar.gz | tar xvz && \
+    mv zeromq-${ZMQ_LATEST_VERSION} zeromq && cd zeromq && \
+    source /opt/rh/gcc-toolset-14/enable && \
+    ./autogen.sh && ./configure --prefix=/usr/ && make -j $(nproc) && \
+    make install
+
+# libsodium (zeromq transtitive dependency)
+RUN \
+    LIBSODIUM_LATEST_VERSION=$(curl -s "https://api.github.com/repos/jedisct1/libsodium/releases/latest" | jq -r '.tag_name' | sed 's/-RELEASE//') && \
+    curl -L https://download.libsodium.org/libsodium/releases/libsodium-${LIBSODIUM_LATEST_VERSION}.tar.gz | tar xvz && \
+    mv libsodium-${LIBSODIUM_LATEST_VERSION} libsodium && cd libsodium && \
+    source /opt/rh/gcc-toolset-14/enable && \
+    ./autogen.sh && ./configure --prefix=/usr/ && make -j $(nproc) && \
+    make install
+
+# libunwind (zeromq transtitive dependency)
+RUN \
+    LIBUNWIND_LATEST_VERSION=$(curl -s "https://api.github.com/repos/libunwind/libunwind/releases/latest" | jq -r '.tag_name' | sed 's/v//') && \
+    curl -L https://github.com/libunwind/libunwind/releases/download/v${LIBUNWIND_LATEST_VERSION}/libunwind-${LIBUNWIND_LATEST_VERSION}.tar.gz | tar xvz && \
+    mv libunwind-${LIBUNWIND_LATEST_VERSION} libunwind && cd libunwind && \
+    source /opt/rh/gcc-toolset-14/enable && \
+    ./configure --prefix=/usr/ && make -j $(nproc) && \
+    make install
+
+# openpgm (zeromq transtitive dependency)
+RUN \
+    # this is the latest version, no newer releases since 2012
+    curl -L https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/openpgm/libpgm-5.2.122.tar.gz | tar xvz && \
+    mv libpgm-5.2.122 libpgm && cd libpgm/openpgm/pgm && \
+    source /opt/rh/gcc-toolset-14/enable && \
+    ./configure --prefix=/usr/ --build=powerpc64le-unknown-linux-gnu && make -j $(nproc) && \
+    make install
+
 # Go build stage
 FROM registry.access.redhat.com/ubi9/go-toolset:1.25.7 AS go-builder
 
@@ -15,11 +66,20 @@ USER root
 WORKDIR /workspace
 
 # Copy Red Hat repository configuration for zeromq packages
-COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
+# COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 
 # Install ZMQ development libraries (required for CGO)
-RUN dnf install -y zeromq-devel pkgconfig && \
+RUN dnf install -y gcc-toolset-14 make pkgconfig && \
     dnf clean all
+RUN --mount=type=cache,from=epel-base,source=/zeromq,target=/zeromq \
+    --mount=type=cache,from=epel-base,source=/libsodium,target=/libsodium \
+    --mount=type=cache,from=epel-base,source=/libunwind,target=/libunwind \
+    --mount=type=cache,from=epel-base,source=/libpgm,target=/libpgm \
+    source /opt/rh/gcc-toolset-14/enable && \
+    make -C /zeromq install && \
+    make -C /libsodium install && \
+    make -C /libunwind install && \
+    make -C /libpgm/openpgm/pgm install
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -43,12 +103,21 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
 WORKDIR /
 
 # Copy Red Hat repository configuration for zeromq packages
-COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
+# COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 
 # Install ZMQ runtime library only (no Python needed)
-RUN microdnf install -y --setopt=install_weak_deps=0 zeromq && \
+RUN microdnf install -y --setopt=install_weak_deps=0 gcc-toolset-14 zlib-devel xz-devel make && \
     microdnf clean all && \
     rm -rf /var/cache/yum /var/lib/yum
+RUN --mount=type=cache,from=epel-base,source=/zeromq,target=/zeromq \
+    --mount=type=cache,from=epel-base,source=/libsodium,target=/libsodium \
+    --mount=type=cache,from=epel-base,source=/libunwind,target=/libunwind \
+    --mount=type=cache,from=epel-base,source=/libpgm,target=/libpgm \
+    source /opt/rh/gcc-toolset-14/enable && \
+    make -C /zeromq install && \
+    make -C /libsodium install && \
+    make -C /libunwind install && \
+    make -C /libpgm/openpgm/pgm install
 
 COPY --from=go-builder /workspace/bin/epp /app/epp
 
