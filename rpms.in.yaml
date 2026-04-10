@@ -13,13 +13,17 @@ packages:
   # Rust and Cargo are available from UBI repositories
   # llvm-libs is required by Rust 1.88 (needs LLVM 20.1, base image has 19.1)
   # annobin needs to be upgraded to a version compatible with LLVM 20.1
-  - zeromq
-  - zeromq-devel
-  - rust
-  - cargo
-  - llvm-libs
-  - annobin
-  - python3.12-devel
-  - python3.12-pip
-  - python3.12-libs
-  - pkgconfig
+  - gcc-toolset-14
+  - libtool
+  - make
+  - automake
+  - jq
+  - zlib-devel
+  - sqlite-devel
+  - ncurses-devel
+  - bzip2-devel
+  - openssl-devel
+  - tk-devel
+  - libpcap-devel
+  - xz-devel
+  - libffi-devel
