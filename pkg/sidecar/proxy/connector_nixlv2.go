@@ -17,30 +17,28 @@ limitations under the License.
 package proxy
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
-func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, apiType APIType) {
-	tokenLimitFields := tokenLimitFieldsForAPIType(apiType)
-	s.logger.V(4).Info("running NIXL protocol V2", "url", prefillPodHostPort, "tokenLimitFields", tokenLimitFields)
+func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
+	s.logger.V(4).Info("running NIXL protocol V2", "url", prefillPodHostPort)
 
 	// Read request body
-	defer r.Body.Close() //nolint:errcheck
+	defer r.Body.Close() //nolint:all
 	original, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest) // TODO: check FastAPI error code when failing to read body
-		w.Write([]byte(err.Error()))         //nolint:errcheck
+		w.Write([]byte(err.Error()))         //nolint:all
 		return
 	}
 
@@ -82,24 +80,10 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	preq.Header.Add(requestHeaderRequestID, uuidStr)
 
-	// Save original values based on API type
 	streamValue, streamOk := completionRequest[requestFieldStream]
 	streamOptionsValue, streamOptionsOk := completionRequest[requestFieldStreamOptions]
-
-	// Save and override token limit fields for prefill
-	type savedField struct {
-		field   string
-		val     any
-		present bool
-	}
-	var savedTokenValues [2]savedField
-	for i, field := range tokenLimitFields {
-		if v, ok := completionRequest[field]; ok {
-			savedTokenValues[i] = savedField{field: field, val: v, present: true}
-		} else {
-			savedTokenValues[i] = savedField{field: field}
-		}
-	}
+	maxTokensValue, maxTokensOk := completionRequest[requestFieldMaxTokens]
+	maxCompletionTokensValue, maxCompletionTokensOk := completionRequest[requestFieldMaxCompletionTokens]
 
 	completionRequest[requestFieldKVTransferParams] = map[string]any{
 		requestFieldDoRemoteDecode:  true,
@@ -112,10 +96,8 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	completionRequest[requestFieldStream] = false
 	delete(completionRequest, requestFieldStreamOptions)
-
-	for _, field := range tokenLimitFields {
-		completionRequest[field] = 1
-	}
+	completionRequest[requestFieldMaxTokens] = 1
+	completionRequest[requestFieldMaxCompletionTokens] = 1
 
 	pbody, err := json.Marshal(completionRequest)
 	if err != nil {
@@ -124,7 +106,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 		}
 		return
 	}
-	preq.Body = io.NopCloser(bytes.NewReader(pbody))
+	preq.Body = io.NopCloser(strings.NewReader(string(pbody)))
 	preq.ContentLength = int64(len(pbody))
 
 	prefillHandler, err := s.prefillerProxyHandler(prefillPodHostPort)
@@ -154,7 +136,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 		if shouldFallbackToDecode(pw) {
 			s.logger.Info("fallback to decode", "request_id", uuidStr)
-			r.Body = io.NopCloser(bytes.NewReader(original))
+			r.Body = io.NopCloser(strings.NewReader(string(original)))
 			s.decoderProxy.ServeHTTP(w, r)
 		} else {
 			for key, values := range pw.Header() {
@@ -163,7 +145,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 				}
 			}
 			w.WriteHeader(pw.statusCode)
-			_, err := w.Write(pw.bodyBytes())
+			_, err := w.Write([]byte(pw.buffer.String()))
 			if err != nil {
 				s.logger.Error(err, "failed to send error response to client")
 			}
@@ -174,7 +156,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	// Process response - extract p/d fields
 	var prefillerResponse map[string]any
-	if err := json.Unmarshal(pw.bodyBytes(), &prefillerResponse); err != nil {
+	if err := json.Unmarshal([]byte(pw.buffer.String()), &prefillerResponse); err != nil {
 		if err := errorJSONInvalid(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
@@ -220,15 +202,14 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	if streamOptionsOk {
 		completionRequest[requestFieldStreamOptions] = streamOptionsValue
 	}
-
-	for i := range savedTokenValues[:len(tokenLimitFields)] {
-		sv := &savedTokenValues[i]
-		delete(completionRequest, sv.field)
-		if sv.present {
-			completionRequest[sv.field] = sv.val
-		}
+	delete(completionRequest, requestFieldMaxTokens)
+	if maxTokensOk {
+		completionRequest[requestFieldMaxTokens] = maxTokensValue
 	}
-
+	delete(completionRequest, requestFieldMaxCompletionTokens)
+	if maxCompletionTokensOk {
+		completionRequest[requestFieldMaxCompletionTokens] = maxCompletionTokensValue
+	}
 	completionRequest[requestFieldKVTransferParams] = pKVTransferParams
 
 	dbody, err := json.Marshal(completionRequest)
@@ -238,7 +219,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 		}
 		return
 	}
-	dreq.Body = io.NopCloser(bytes.NewReader(dbody))
+	dreq.Body = io.NopCloser(strings.NewReader(string(dbody)))
 	dreq.ContentLength = int64(len(dbody))
 
 	// 2. Forward to local decoder.

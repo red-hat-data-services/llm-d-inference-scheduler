@@ -13,8 +13,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
 )
 
 // startHTTP starts the HTTP reverse proxy.
@@ -134,7 +133,22 @@ func (s *Server) startHTTP(ctx context.Context) error {
 // Passthrough decoder handler
 func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureSkipVerify bool) *httputil.ReverseProxy {
 	decoderProxy := httputil.NewSingleHostReverseProxy(decoderURL)
-	decoderProxy.Transport = s.newProxyTransport(decoderURL.Scheme, decoderInsecureSkipVerify)
+	if decoderURL.Scheme == schemeHTTPS {
+		decoderProxy.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: decoderInsecureSkipVerify,
+				MinVersion:         tls.VersionTLS12,
+				CipherSuites: []uint16{
+					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+					tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+					tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+				},
+			},
+		}
+	}
 	decoderProxy.ErrorHandler = func(res http.ResponseWriter, _ *http.Request, err error) {
 
 		// Log errors from the decoder proxy

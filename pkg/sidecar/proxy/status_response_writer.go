@@ -17,8 +17,8 @@ limitations under the License.
 package proxy
 
 import (
-	"bytes"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -28,7 +28,7 @@ const sseEventDelimiter = "\n\n"
 // bufferedResponseWriter receives responses from prefillers
 type bufferedResponseWriter struct {
 	headers    http.Header
-	buffer     bytes.Buffer
+	buffer     strings.Builder
 	statusCode int
 }
 
@@ -50,11 +50,6 @@ func (w *bufferedResponseWriter) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
 }
 
-// bodyBytes returns the buffered body without copying.
-func (w *bufferedResponseWriter) bodyBytes() []byte {
-	return w.buffer.Bytes()
-}
-
 type flushableResponseWriter interface {
 	http.ResponseWriter
 	http.Flusher
@@ -73,7 +68,7 @@ type responseWriterWithBuffer struct {
 	// mu protects buffer, statusCode, and wroteHeader during buffering mode
 	// and during the transition to direct mode.
 	mu          sync.Mutex
-	buffer      bytes.Buffer
+	buffer      strings.Builder
 	statusCode  int
 	wroteHeader bool
 
@@ -122,7 +117,7 @@ func (w *responseWriterWithBuffer) Write(b []byte) (int, error) {
 	// For SSE streaming, the first chunk is just the role announcement with
 	// finish_reason:null. We need the second chunk to see if cache_threshold
 	// was returned (early abort) or if decode is proceeding normally.
-	if shouldSignalBytes(w.buffer.Bytes()) {
+	if shouldSignal(w.buffer.String()) {
 		w.signalReady()
 	}
 
@@ -152,7 +147,7 @@ func (w *responseWriterWithBuffer) Flush() {
 	if w.buffering.Load() {
 		// Apply same logic as Write(): only signal when we have at least 2 SSE events.
 		w.mu.Lock()
-		shouldSignal := shouldSignalBytes(w.buffer.Bytes())
+		shouldSignal := shouldSignal(w.buffer.String())
 		w.mu.Unlock()
 		if shouldSignal {
 			w.signalReady()
@@ -215,7 +210,7 @@ func (w *responseWriterWithBuffer) flushBufferAndGoDirect() error {
 
 	// Write buffered content to underlying writer
 	if w.buffer.Len() > 0 {
-		_, err := w.writerFlusher.Write(w.buffer.Bytes())
+		_, err := w.writerFlusher.Write([]byte(w.buffer.String()))
 		if err != nil {
 			return err
 		}
@@ -233,8 +228,6 @@ func (w *responseWriterWithBuffer) flushBufferAndGoDirect() error {
 	return nil
 }
 
-var sseEventDelimiterBytes = []byte(sseEventDelimiter)
-
-func shouldSignalBytes(data []byte) bool {
-	return bytes.Count(data, sseEventDelimiterBytes) >= 2
+func shouldSignal(data string) bool {
+	return strings.Count(data, sseEventDelimiter) >= 2
 }
