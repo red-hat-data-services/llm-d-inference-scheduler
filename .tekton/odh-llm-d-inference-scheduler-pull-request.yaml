@@ -1,4 +1,3 @@
-
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -50,6 +49,18 @@ spec:
         {
             "type": "generic",
             "path": "."
+        },
+        {
+            "type": "rpm",
+            "path": ".",
+            "include_summary_in_sbom": true,
+            "options": {
+                "dnf": {
+                    "epel": {
+                        "gpgcheck": "0"
+                    }
+                }
+            }
         }
       ]
   - name: build-source-image
@@ -64,8 +75,6 @@ spec:
     value: 5d
   - name: enable-slack-failure-notification
     value: "false"
-  - name: rhel-subscription-activation-key
-    value: "rhel-subscription-activation-key-nonexistent"
   pipelineRef:
     resolver: git
     params:
