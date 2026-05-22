@@ -24,7 +24,7 @@ Before installing the charts, ensure that the **Gateway API Inference Extension 
 
 Standalone mode is useful when you want to run EPP as a local router/proxy for a specific model service, without integrating with a cluster-wide Gateway.
 
-#### Standalone with Envoy Sidecar (Default Standalone)
+#### Standalone with Envoy Proxy (Default Standalone)
 Deploys EPP with an Envoy sidecar proxy that intercepts incoming HTTP/gRPC traffic and routes it using EPP:
 
 ```bash
@@ -32,15 +32,15 @@ helm install my-standalone-router ./config/charts/llm-d-router-standalone \
   --set router.modelServers.matchLabels.app=my-vllm-service
 ```
 
-#### Standalone with Agentgateway Sidecar (Service-Backed)
-Deploys EPP with an Agentgateway sidecar. This mode requires disabling the `InferencePool` resource creation (`create=false`) and routes traffic to an existing Kubernetes Service:
+#### Standalone with Agentgateway Proxy (Service-Backed)
+Deploys EPP with an Agentgateway proxy. This mode requires disabling the `InferencePool` resource creation (`create=false`) and routes traffic to an existing Kubernetes Service:
 
 ```bash
 helm install my-standalone-router ./config/charts/llm-d-router-standalone \
   --set router.inferencePool.create=false \
-  --set router.sidecar.proxyType=agentgateway \
-  --set router.sidecar.agentgateway.service.name=my-model-service \
-  --set router.sidecar.agentgateway.service.ports="8000"
+  --set router.proxy.proxyType=agentgateway \
+  --set router.proxy.agentgateway.service.name=my-model-service \
+  --set router.proxy.agentgateway.service.ports="8000"
 ```
 ---
 
@@ -188,27 +188,27 @@ The following table lists all configurable parameters for the LLM-D Router chart
 | `router.epp.pluginsCustomConfig` | Inline custom YAML configuration for EPP plugins. | `{}` |
 | `router.volumes` | Extra volumes for EPP pod. | `[]` |
 | `router.epp.volumeMounts` | Extra volume mounts for EPP container. | `[]` |
-| **EPP Sidecar Config (`router.sidecar.*`)** | | |
-| `router.sidecar.enabled` | Enable a sidecar proxy container in the EPP deployment. | `false` |
-| `router.sidecar.proxyType` | **Standalone only**. Type of sidecar proxy. Options: `[envoy, agentgateway]`. | `envoy` |
-| `router.sidecar.name` | Name of the sidecar container. | `""` |
-| `router.sidecar.image` | Sidecar container image. | `""` |
-| `router.sidecar.imagePullPolicy` | Sidecar container image pull policy. | `IfNotPresent` |
-| `router.sidecar.command` | Sidecar container command. | `""` |
-| `router.sidecar.args` | Sidecar container arguments. | `[]` |
-| `router.sidecar.env` | Sidecar container environment variables. | `[]` |
-| `router.sidecar.ports` | Sidecar container ports. | `[]` |
-| `router.sidecar.livenessProbe` | Sidecar container liveness probe. | `{}` |
-| `router.sidecar.readinessProbe` | Sidecar container readiness probe. | `{}` |
-| `router.sidecar.resources` | Sidecar container resource requests and limits. | `{}` |
-| `router.sidecar.volumeMounts` | Sidecar container volume mounts. | `[]` |
-| `router.sidecar.volumes` | Sidecar container volumes. | `[]` |
-| `router.sidecar.configMapData` | Key-value pairs to include in a ConfigMap created for the sidecar. | `{}` |
-| **Standalone Sidecar Overrides (`router.sidecar.agentgateway.*`)** | | |
-| `router.sidecar.agentgateway.service.create` | Create a dedicated model Service for the Agentgateway sidecar. | `true` |
-| `router.sidecar.agentgateway.service.name` | Name of the model Service to route to. | `""` |
-| `router.sidecar.agentgateway.service.namespace` | Namespace of the model Service. Defaults to release namespace. | `""` |
-| `router.sidecar.agentgateway.service.ports` | Port list for the model Service (must match `modelServers.targetPorts`). | `[]` |
+| **EPP Proxy Config (`router.proxy.*`)** | | |
+| `router.proxy.enabled` | Enable a sidecar proxy container in the EPP deployment. | `false` |
+| `router.proxy.proxyType` | **Standalone only**. Type of sidecar proxy. Options: `[envoy, agentgateway]`. | `envoy` |
+| `router.proxy.name` | Name of the sidecar container. | `""` |
+| `router.proxy.image` | Sidecar container image. | `""` |
+| `router.proxy.imagePullPolicy` | Sidecar container image pull policy. | `IfNotPresent` |
+| `router.proxy.command` | Sidecar container command. | `""` |
+| `router.proxy.args` | Sidecar container arguments. | `[]` |
+| `router.proxy.env` | Sidecar container environment variables. | `[]` |
+| `router.proxy.ports` | Sidecar container ports. | `[]` |
+| `router.proxy.livenessProbe` | Sidecar container liveness probe. | `{}` |
+| `router.proxy.readinessProbe` | Sidecar container readiness probe. | `{}` |
+| `router.proxy.resources` | Sidecar container resource requests and limits. | `{}` |
+| `router.proxy.volumeMounts` | Sidecar container volume mounts. | `[]` |
+| `router.proxy.volumes` | Sidecar container volumes. | `[]` |
+| `router.proxy.configMapData` | Key-value pairs to include in a ConfigMap created for the sidecar. | `{}` |
+| **Standalone Proxy Overrides (`router.proxy.agentgateway.*`)** | | |
+| `router.proxy.agentgateway.service.create` | Create a dedicated model Service for the Agentgateway sidecar. | `true` |
+| `router.proxy.agentgateway.service.name` | Name of the model Service to route to. | `""` |
+| `router.proxy.agentgateway.service.namespace` | Namespace of the model Service. Defaults to release namespace. | `""` |
+| `router.proxy.agentgateway.service.ports` | Port list for the model Service (must match `modelServers.targetPorts`). | `[]` |
 | **Monitoring & Tracing Config** | | |
 | `router.monitoring.provider.name` | Metrics provider. Options: `[gmp, prometheusoperator]`. | `prometheusoperator` |
 | `router.monitoring.provider.gmp.autopilot` | Set to `true` if deploying GMP on GKE Autopilot. | `false` |

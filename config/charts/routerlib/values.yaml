@@ -61,8 +61,8 @@ epp:
 affinity: {}
 tolerations: []
 
-# By default no sidecars are configured
-sidecar:
+# By default no proxy is configured
+proxy:
   enabled: false    
     
 # Monitoring configuration for EPP

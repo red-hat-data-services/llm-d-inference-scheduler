@@ -84,15 +84,15 @@ data:
   {{- end }}
   
 ---
-{{- $sidecar := include "llm-d-router.sidecar" . | fromYaml | default dict }}
-{{- if and $sidecar.enabled $sidecar.configMap }}
+{{- $proxy := include "llm-d-router.proxy" . | fromYaml | default dict }}
+{{- if and $proxy.enabled $proxy.configMap }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ $sidecar.configMap.name }}
+  name: {{ $proxy.configMap.name }}
   namespace: {{ .Release.Namespace }}
 data:
-  {{- include "llm-d-router.sidecarConfigMapData" . | nindent 2 }}
+  {{- include "llm-d-router.proxyConfigMapData" . | nindent 2 }}
 {{- end }}
 ---
 {{- if .Values.router.latencyPredictor.enabled }}
