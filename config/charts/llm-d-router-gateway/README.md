@@ -7,7 +7,7 @@ A chart to deploy an InferencePool and a corresponding EndpointPicker (epp) depl
 To install an InferencePool named `vllm-qwen3-32b`  that selects from endpoints with label `app: vllm-qwen3-32b` and listening on port `8000`, you can run the following command:
 
 ```txt
-$ helm install vllm-qwen3-32b ./config/charts/inferencepool \
+$ helm install vllm-qwen3-32b ./config/charts/llm-d-router-gateway \
   --set inferencePool.modelServers.matchLabels.app=vllm-qwen3-32b \
 ```
 
@@ -17,7 +17,7 @@ To install via the latest published chart in staging  (--version v0 indicates la
 $ helm install vllm-qwen3-32b \
   --set inferencePool.modelServers.matchLabels.app=vllm-qwen3-32b \
   --set provider.name=[none|gke|istio] \
-  oci://ghcr.io/llm-d/charts/inferencepool --version v0
+  oci://ghcr.io/llm-d/charts/llm-d-router-gateway --version v0
 ```
 
 Note that the provider name is needed to deploy provider-specific resources. If no provider is specified, then only the InferencePool object and the EPP are deployed.
@@ -31,7 +31,7 @@ $ helm install vllm-qwen3-32b \
   --set inferencePool.modelServers.matchLabels.app=vllm-qwen3-32b \
   --set inferenceExtension.flags.<FLAG_NAME>=<FLAG_VALUE>
   --set provider.name=[none|gke|istio] \
-  oci://ghcr.io/llm-d/charts/inferencepool --version v0
+  oci://ghcr.io/llm-d/charts/llm-d-router-gateway --version v0
 ```
 
 Alternatively, you can define flags in the `values.yaml` file:
@@ -64,7 +64,7 @@ inferenceExtension:
 Then apply it with:
 
 ```txt
-$ helm install vllm-qwen3-32b ./config/charts/inferencepool -f values.yaml
+$ helm install vllm-qwen3-32b ./config/charts/llm-d-router-gateway -f values.yaml
 ```
 
 ### Install with Custom EPP Plugins Configuration
@@ -106,7 +106,7 @@ inferenceExtension:
 Then apply it with:
 
 ```txt
-$ helm install vllm-qwen3-32b ./config/charts/inferencepool -f values.yaml
+$ helm install vllm-qwen3-32b ./config/charts/llm-d-router-gateway -f values.yaml
 ```
 
 ### Install for Triton TensorRT-LLM
@@ -118,7 +118,7 @@ $ helm install triton-qwen3-32b \
   --set inferencePool.modelServers.matchLabels.app=triton-qwen3-32b \
   --set inferencePool.modelServerType=triton-tensorrt-llm \
   --set provider.name=[none|gke|istio] \
-  oci://ghcr.io/llm-d/charts/inferencepool --version v0
+  oci://ghcr.io/llm-d/charts/llm-d-router-gateway --version v0
 ```
 
 ### Install for trtllm-serve (TensorRT-LLM)
@@ -130,7 +130,7 @@ $ helm install trtllm-serve-qwen3-32b \
   --set inferencePool.modelServers.matchLabels.app=trtllm-serve-qwen3-32b \
   --set inferencePool.modelServerType=trtllm-serve \
   --set provider.name=[none|gke|istio] \
-  oci://ghcr.io/llm-d/charts/inferencepool --version v0
+  oci://ghcr.io/llm-d/charts/llm-d-router-gateway --version v0
 ```
 
 ### Install with Latency-Based Routing
@@ -151,7 +151,7 @@ To enable HA, set `inferenceExtension.replicas` to a number greater than 1.
   --set inferencePool.modelServers.matchLabels.app=vllm-qwen3-32b \
   --set inferenceExtension.replicas=3 \
   --set provider=[none|gke] \
-  oci://ghcr.io/llm-d/charts/inferencepool --version v0
+  oci://ghcr.io/llm-d/charts/llm-d-router-gateway --version v0
   ```
 
 * Via `values.yaml`:
@@ -164,7 +164,7 @@ To enable HA, set `inferenceExtension.replicas` to a number greater than 1.
   Then apply it with:
 
   ```txt
-  helm install vllm-qwen3-32b ./config/charts/inferencepool -f values.yaml
+  helm install vllm-qwen3-32b ./config/charts/llm-d-router-gateway -f values.yaml
   ```
 
 ### Install with Monitoring
@@ -192,7 +192,7 @@ If you are using a GKE Autopilot cluster, you also need to set `inferenceExtensi
 Then apply it with:
 
 ```txt
-helm install vllm-qwen3-32b ./config/charts/inferencepool -f values.yaml
+helm install vllm-qwen3-32b ./config/charts/llm-d-router-gateway -f values.yaml
 ```
 
 ## Uninstall
@@ -227,7 +227,7 @@ The following table list the configurable parameters of the chart.
 | `inferenceExtension.tolerations`                           | Tolerations for the endpoint picker. Defaults to `[]` from the shared [`inference-extension`](../epplib/values.yaml) library chart.                                                                                                                                                                                                                                                        |
 | `inferenceExtension.monitoring.interval`                   | Metrics scraping interval for monitoring. Defaults to `10s` from the shared [`inference-extension`](../epplib/values.yaml) library chart.                                                                                                                                                                                                                                         |
 | `inferenceExtension.monitoring.prometheus.enabled`         | Enable Prometheus ServiceMonitor creation for EPP metrics collection. Defaults to `false` from the shared [`inference-extension`](../epplib/values.yaml) library chart.                                                                                                                                                                                                           |
-| `inferenceExtension.monitoring.gke.enabled`                | **DEPRECATED**: Legacy GKE monitoring toggle. Prefer [`inferenceExtension.monitoring.provider.name`](../inferencepool/README.md#configuration) set to `gmp`.                                                                                                                                                                                                                       |
+| `inferenceExtension.monitoring.gke.enabled`                | **DEPRECATED**: Legacy GKE monitoring toggle. Prefer [`inferenceExtension.monitoring.provider.name`](../llm-d-router-gateway/README.md#configuration) set to `gmp`.                                                                                                                                                                                                                       |
 | `inferenceExtension.monitoring.prometheus.auth.enabled`    | Enable auth for Prometheus metrics endpoint. Defaults to `true` from the shared [`inference-extension`](../epplib/values.yaml) library chart.                                                                                                                                                                                                                                      |
 | `inferenceExtension.monitoring.prometheus.auth.secretName` | Name of the service account token secret for metrics authentication. Defaults to `inference-gateway-sa-metrics-reader-secret` from the shared [`inference-extension`](../epplib/values.yaml) library chart.                                                                                                                                                                      |
 | `inferenceExtension.monitoring.prometheus.extraLabels`     | Extra labels added to ServiceMonitor.                                                                                                                                                                                                                                                                                                                                                         |

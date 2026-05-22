@@ -1,7 +1,7 @@
 {{/*
 common validations
 */}}
-{{- define "llm-d-router.validations.inferencepool.common" }}
+{{- define "llm-d-router.validations.gateway.common" -}}
 {{- if and .Values.inferenceExtension.endpointsServer .Values.inferenceExtension.endpointsServer.createInferencePool }}
 {{- if or (empty $.Values.inferencePool.modelServers) (not $.Values.inferencePool.modelServers.matchLabels) }}
 {{- fail ".Values.inferencePool.modelServers.matchLabels is required" }}

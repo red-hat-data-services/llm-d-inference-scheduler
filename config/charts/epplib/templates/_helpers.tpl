@@ -32,10 +32,10 @@ Selector labels
 {{- /* Check if endpointsServer exists AND if createInferencePool is false */ -}}
 {{- if and .Values.inferenceExtension.endpointsServer (not .Values.inferenceExtension.endpointsServer.createInferencePool) -}}
 {{- /* LOGIC FOR STANDALONE EPP MODE */ -}}
-epp: {{ include "llm-d-router.name" . }}
+llm-d-router-standalone: {{ include "llm-d-router.name" . }}
 {{- else -}}
-{{- /* LOGIC FOR PARENT (INFERENCEPOOL) MODE */ -}}
-inferencepool: {{ include "llm-d-router.name" . }}
+{{- /* LOGIC FOR PARENT (LLM-D-ROUTER-GATEWAY) MODE */ -}}
+llm-d-router-gateway: {{ include "llm-d-router.name" . }}
 {{- end -}}
 {{- end -}}
 
@@ -44,9 +44,9 @@ Mode labels
 */}}
 {{- define "llm-d-router.modeLabels" -}}
 {{- if and .Values.inferenceExtension.endpointsServer (not .Values.inferenceExtension.endpointsServer.createInferencePool) -}}
-llm-d.ai/igw-mode: standalone
+llm-d.ai/igw-mode: llm-d-router-standalone
 {{- else -}}
-llm-d.ai/igw-mode: inferencepool
+llm-d.ai/igw-mode: llm-d-router-gateway
 {{- end -}}
 {{- end -}}
 
@@ -215,7 +215,7 @@ Standalone uses proxy presets merged with explicit sidecar overrides.
 {{- define "llm-d-router.sidecar" -}}
 {{- $sidecar := deepCopy (.Values.inferenceExtension.sidecar | default dict) -}}
 {{- $resolved := $sidecar -}}
-{{- if eq .Chart.Name "standalone" -}}
+{{- if eq .Chart.Name "llm-d-router-standalone" -}}
   {{- $proxyType := include "llm-d-router.sidecarProxyType" . -}}
   {{- $presets := index $sidecar "presets" | default dict -}}
   {{- $preset := deepCopy ((index $presets $proxyType) | default dict) -}}
@@ -243,7 +243,7 @@ Return the rendered sidecar ConfigMap data.
 {{- $sidecar := include "llm-d-router.sidecar" . | fromYaml | default dict -}}
 {{- $configMap := index $sidecar "configMap" | default dict -}}
 {{- $data := deepCopy ((index $configMap "data") | default dict) -}}
-{{- if and (eq .Chart.Name "standalone") (eq (include "llm-d-router.sidecarProxyType" .) "agentgateway") -}}
+{{- if and (eq .Chart.Name "llm-d-router-standalone") (eq (include "llm-d-router.sidecarProxyType" .) "agentgateway") -}}
   {{- $generated := dict "config.yaml" (include "llm-d-router.sidecar.agentgatewayConfig" .) -}}
   {{- $data = mergeOverwrite $data $generated -}}
 {{- end -}}
