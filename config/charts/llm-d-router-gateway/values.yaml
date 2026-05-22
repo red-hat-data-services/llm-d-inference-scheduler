@@ -1,37 +1,7 @@
 inferenceExtension:
-  failureMode: "FailOpen"
-
-  # Define additional container ports
-  extraContainerPorts: []
-
-  # Define additional service ports
-  # Example environment variables:  
-  #  extraServicePorts:
-  #    - name: http
-  #      port: 80
-  #      protocol: TCP
-  #      targetPort: 8081
-  extraServicePorts: []
-
-  # Example flags:
-  # flags:
-  #  # Log verbosity
-  #  v: 2
-
-  # Sidecar configuration for EPP
-  sidecar:
-    enabled: false
-
-inferencePool:
-  targetPorts:
-    - number: 8000
-  modelServerType: vllm # vllm, sglang, triton-tensorrt-llm, trtllm-serve, triton
-  modelServerProtocol: http # http, grpc
-  parser: "" # openai-parser, vllmgrpc-parser, passthrough-parser, or empty for auto-selection
-  apiVersion: inference.networking.k8s.io/v1
-  # modelServers: # REQUIRED
-  #   matchLabels:
-  #     app: vllm-qwen3-32b
+  modelServers:
+    # matchLabels: # REQUIRED
+    #   app: vllm-qwen3-32b
 
 # Gateway provider selection.
 # This section configures the gateway implementation only; it is not a generic infrastructure provider setting.

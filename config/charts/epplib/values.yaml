@@ -6,12 +6,29 @@ image:
   pullPolicy: Always
 extProcPort: 9002
 
+# Example flags:
+# flags:
+#  # Log verbosity
+#  v: 2
+
 # Example environment variables:
 # env:
 #   ENABLE_EXPERIMENTAL_FEATURE: "true"
 env: []
 
 pluginsConfigFile: "default-plugins.yaml"
+
+# Define additional container ports
+extraContainerPorts: []
+
+# Define additional service ports
+# Example environment variables:  
+#  extraServicePorts:
+#    - name: http
+#      port: 80
+#      protocol: TCP
+#      targetPort: 8081
+extraServicePorts: []
 
 # Example defining a custom EPP config file
 # pluginsCustomConfig:
@@ -39,6 +56,10 @@ resources:
   limits:
     memory: 16Gi
 
+# By default no sidecars are configured
+sidecar:
+  enabled: false    
+    
 # Monitoring configuration for EPP
 monitoring:
   interval: "10s"
@@ -171,3 +192,18 @@ latencyPredictor:
     LATENCY_MAX_SAMPLE_SIZE: "10000"
     LATENCY_MAX_CONCURRENT_DISPATCHES: "36"
     LATENCY_COALESCE_WINDOW_MS: "1"
+
+inferencePool:
+  create: true
+  apiVersion: inference.networking.k8s.io/v1
+  failureMode: "FailOpen"
+
+parser: "" # openai-parser, vllmgrpc-parser, passthrough-parser, or empty for auto-selection
+
+modelServers:
+  type: vllm # vllm, sglang, triton-tensorrt-llm, trtllm-serve, triton
+  protocol: http # http, grpc
+  targetPorts:
+    - number: 8000
+  # matchLabels: # REQUIRED in parent charts if creating inference pool
+  #   app: vllm-qwen3-32b
