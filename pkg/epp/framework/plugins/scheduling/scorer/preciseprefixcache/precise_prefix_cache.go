@@ -252,7 +252,7 @@ func New(ctx context.Context, name string, config PluginConfig) (*Scorer, error)
 		pluginState:        plugin.NewPluginState(ctx),
 		speculativeCache:   speculativeCache,
 		speculativeTTL:     speculativeTTL,
-		blockSizeTokens:    config.TokenProcessorConfig.BlockSize,
+		blockSizeTokens:    tokenProcessor.BlockSize(),
 		speculativeEnabled: config.SpeculativeIndexing,
 		subscriberCtx:      ctx,
 		prefixMatchDataKey: attrprefix.PrefixCacheMatchInfoDataKey.WithNonEmptyProducerName(name),
