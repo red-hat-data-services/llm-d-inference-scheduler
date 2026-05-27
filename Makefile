@@ -21,7 +21,6 @@ PROJECT_NAME ?= llm-d-router
 EPP_IMAGE_NAME ?= llm-d-router-endpoint-picker
 SIDECAR_IMAGE_NAME ?= llm-d-router-disagg-sidecar
 VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-sim
-UDS_TOKENIZER_IMAGE_NAME ?= llm-d-uds-tokenizer
 SIDECAR_NAME ?= pd-sidecar
 BUILDER_IMAGE_NAME ?= llm-d-builder
 IMAGE_REGISTRY ?= ghcr.io/llm-d
@@ -34,13 +33,9 @@ SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
 SIDECAR_TAG ?= dev
 export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 
-VLLM_SIMULATOR_TAG ?= v0.8.2
+VLLM_SIMULATOR_TAG ?= v0.9.0
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
-
-UDS_TOKENIZER_TAG ?= dev
-UDS_TOKENIZER_TAG_BASE ?= $(IMAGE_REGISTRY)/$(UDS_TOKENIZER_IMAGE_NAME)
-export UDS_TOKENIZER_IMAGE ?= $(UDS_TOKENIZER_TAG_BASE):$(UDS_TOKENIZER_TAG)
 
 # CPU-only vLLM image that exposes `vllm launch render` for the token-producer
 # plugin's HTTP backend.
@@ -119,7 +114,7 @@ endif
 # Env vars forwarded into the e2e test container.
 # Add new image vars here so they are automatically passed through.
 # Should we pass ALL env vars here?
-E2E_ENV_VARS = EPP_IMAGE VLLM_IMAGE SIDECAR_IMAGE UDS_TOKENIZER_IMAGE VLLM_RENDER_IMAGE \
+E2E_ENV_VARS = EPP_IMAGE VLLM_IMAGE SIDECAR_IMAGE VLLM_RENDER_IMAGE \
                E2E_KEEP_CLUSTER_ON_FAILURE E2E_PORT E2E_METRICS_PORT K8S_CONTEXT READY_TIMEOUT
 BUILDER_E2E_ENV_FLAGS = $(foreach v,$(E2E_ENV_VARS),$(if $($(v)),-e $(v)=$($(v))))
 ifneq ($(filter command line environment,$(origin NAMESPACE)),)
@@ -468,8 +463,6 @@ env: ## Print environment variables
 	@echo "SIDECAR_IMAGE=$(SIDECAR_IMAGE)"
 	@echo "VLLM_SIMULATOR_TAG=$(VLLM_SIMULATOR_TAG)"
 	@echo "VLLM_IMAGE=$(VLLM_IMAGE)"
-	@echo "UDS_TOKENIZER_TAG=$(UDS_TOKENIZER_TAG)"
-	@echo "UDS_TOKENIZER_IMAGE=$(UDS_TOKENIZER_IMAGE)"
 	@echo "VLLM_RENDER_IMAGE=$(VLLM_RENDER_IMAGE)"
 	@echo "BUILDER_IMAGE=$(BUILDER_IMAGE)"
 
