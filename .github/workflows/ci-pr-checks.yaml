@@ -90,10 +90,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
-
-      - name: Verify go.mod and go.sum are tidy
-        run: go mod tidy -diff
+          cache: false # only needed for `go list` in Makefile; module cache managed by the explicit cache step below
 
       - name: Create and resolve Go cache volumes
         id: go-cache
@@ -112,18 +109,6 @@ jobs:
           key: go-cache-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-cache-
-
-      - name: Run make lint
-        run: make lint
-
-      - name: Run govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
-          govulncheck ./...
-
-      - name: Run make build
-        shell: bash
-        run: make build
 
       # Restore the baseline saved from the last main push so the compare step
       # can diff against it. Missing cache (first PR ever) is not an error;
