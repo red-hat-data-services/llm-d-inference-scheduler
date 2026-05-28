@@ -389,7 +389,7 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 		endpointCandidates = requestcontrol.NewCachedEndpointCandidates(ctx, endpointCandidates, time.Millisecond*50)
 		setupLog.Info("Initializing experimental Flow Control layer")
 		registry := fcregistry.NewFlowRegistry(eppConfig.FlowControlConfig.Registry, setupLog)
-		fc, err := fccontroller.NewFlowController(
+		fc := fccontroller.NewFlowController(
 			ctx,
 			opts.PoolName,
 			eppConfig.FlowControlConfig.Controller,
@@ -400,9 +400,6 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 				UsageLimitPolicy:   eppConfig.FlowControlConfig.UsageLimitPolicy,
 			},
 		)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize Flow Controller: %w", err)
-		}
 		go registry.Run(ctx)
 		admissionController = requestcontrol.NewFlowControlAdmissionController(fc, opts.PoolName)
 	} else {
