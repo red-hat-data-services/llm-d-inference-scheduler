@@ -47,7 +47,7 @@ var (
 	scheme                       = runtime.NewScheme()
 	registeredFeatureGatesMu     sync.RWMutex
 	registeredFeatureGates       = sets.New[string]()
-	deprecatedSchemeGroupVersion = schema.GroupVersion{Group: "inference.networking.x-k8s.io", Version: "v1alpha1"}
+	deprecatedSchemeGroupVersion = schema.GroupVersion{Group: "inference.networking.x-k8s.io", Version: "v1alpha1"} // TODO: deprecated should be clean up
 )
 
 func init() {
