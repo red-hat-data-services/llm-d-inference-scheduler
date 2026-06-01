@@ -22,14 +22,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
 )
 
 var _ = Describe("SGLang Connector", func() {
@@ -80,25 +79,26 @@ var _ = Describe("SGLang Connector", func() {
 		}
 
 		// Because SGLang connector sends requests concurrently (prefill in goroutine),
-		// we sleep a tiny bit to ensure the prefill handler has time to finish processing.
-		time.Sleep(100 * time.Millisecond)
+		// wait until the prefill handler has finished processing before reading its state.
+		Eventually(testInfo.prefillHandler.RequestCount.Load).Should(Equal(int32(1)))
 
 		// Validate prefill request
-		Expect(testInfo.prefillHandler.RequestCount.Load()).To(BeNumerically("==", 1))
-		Expect(testInfo.prefillHandler.CompletionRequests).To(HaveLen(1))
-		prq1 := testInfo.prefillHandler.CompletionRequests[0]
+		prefillReqs := testInfo.prefillHandler.GetCompletionRequests()
+		Expect(prefillReqs).To(HaveLen(1))
+		prq1 := prefillReqs[0]
 
 		// Validate decode request
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
-		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))
-		drq1 := testInfo.decodeHandler.CompletionRequests[0]
+		decodeReqs := testInfo.decodeHandler.GetCompletionRequests()
+		Expect(decodeReqs).To(HaveLen(1))
+		drq1 := decodeReqs[0]
 
 		// Bootstrap validations for prefill
 		Expect(prq1).To(HaveKey(requestFieldBootstrapHost))
 		Expect(prq1).To(HaveKey(requestFieldBootstrapPort))
 		Expect(prq1).To(HaveKey(requestFieldBootstrapRoom))
 
-		expectedHost := strings.Split(prefillHostPort, ":")[0]
+		expectedHost := extractHost(prefillHostPort)
 		Expect(prq1[requestFieldBootstrapHost]).To(Equal(expectedHost))
 		Expect(prq1[requestFieldBootstrapPort]).To(Equal(float64(sglangBootstrapPort)))
 		Expect(prq1[requestFieldBootstrapRoom]).ToNot(BeNil())

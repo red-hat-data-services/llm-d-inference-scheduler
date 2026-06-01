@@ -11,16 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	giePlugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-router/test/utils"
 )
 
 func TestMain(m *testing.M) {
-	giePlugin.Register(DisaggHeadersHandlerType, HeadersHandlerFactory)
-	giePlugin.Register(PrefillHeaderHandlerType, HeadersHandlerFactory) //nolint:staticcheck
+	fwkplugin.Register(DisaggHeadersHandlerType, HeadersHandlerFactory)
+	fwkplugin.Register(PrefillHeaderHandlerType, HeadersHandlerFactory) //nolint:staticcheck
 	os.Exit(m.Run())
 }
 
@@ -106,7 +106,7 @@ func TestHeadersHandlerFactory(t *testing.T) {
 				raw = json.RawMessage(tt.rawParams)
 			}
 
-			p, err := HeadersHandlerFactory(tt.pluginName, raw, nil)
+			p, err := HeadersHandlerFactory(tt.pluginName, fwkplugin.StrictDecoder(raw), nil)
 			if tt.expectErr {
 				assert.Error(t, err)
 				assert.Nil(t, p)
@@ -144,7 +144,7 @@ func TestPreRequestNilSchedulingResult(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -157,11 +157,11 @@ func TestPreRequestNilSchedulingResult(t *testing.T) {
 
 func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
 	// Simulate what the config loader does when it reads type: prefill-header-handler from YAML
-	factory, ok := giePlugin.Registry[PrefillHeaderHandlerType]
+	factory, ok := fwkplugin.Registry[PrefillHeaderHandlerType]
 	require.True(t, ok, "prefill-header-handler must be in the registry")
 
 	raw := json.RawMessage(`{"prefillProfile": "prefill"}`)
-	p, err := factory("compat-handler", raw, nil)
+	p, err := factory("compat-handler", fwkplugin.StrictDecoder(raw), nil)
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
@@ -173,7 +173,7 @@ func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
 	// Verify it correctly handles a PD-only scheduling result
 	ctx := utils.NewTestContext(t)
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 	result := &scheduling.SchedulingResult{
@@ -198,7 +198,7 @@ func TestPreRequestPrefillProfileExists(t *testing.T) {
 
 	request := &scheduling.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   "req-123",
+		RequestID:   "req-123",
 		Headers:     map[string]string{},
 	}
 
@@ -315,7 +315,7 @@ func TestPreRequestPrefillProfileNilResult(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -338,7 +338,7 @@ func TestPreRequestPrefillEmptyTargetEndpoints(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -388,7 +388,7 @@ func TestPreRequestEncodeProfileExists(t *testing.T) {
 
 	request := &scheduling.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   "req-123",
+		RequestID:   "req-123",
 		Headers:     map[string]string{},
 	}
 
@@ -413,7 +413,7 @@ func TestPreRequestEncodeProfileNotExists(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -433,7 +433,7 @@ func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers: map[string]string{
 			routing.EncoderEndpointsHeader: "old-host:9999",
 		},
@@ -460,7 +460,7 @@ func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers: map[string]string{
 			routing.EncoderEndpointsHeader: "stale-host:9999",
 		},
@@ -482,7 +482,7 @@ func TestPreRequestEncodeCustomProfile(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "my-custom-encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -507,7 +507,7 @@ func TestPreRequestEncodeIPv6Address(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -534,7 +534,7 @@ func TestPreRequestEncodeProfileNilResult(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -557,7 +557,7 @@ func TestPreRequestEncodeEmptyTargetEndpoints(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers: map[string]string{
 			routing.EncoderEndpointsHeader: "stale-host:9999",
 		},
@@ -582,7 +582,7 @@ func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
