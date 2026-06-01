@@ -42,8 +42,6 @@ const (
 	InferenceObjectiveSubsystem = inferenceObjectiveComponent
 	// InferenceExtensionSubsystem is the legacy subsystem for inference extension metrics.
 	InferenceExtensionSubsystem = inferenceExtension
-	// LLMDRouterEndpointPickerSubsystem is the subsystem for llm-d router endpoint picker metrics.
-	LLMDRouterEndpointPickerSubsystem = "llm_d_router_endpoint_picker"
 )
 
 var (
