@@ -17,9 +17,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apilabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -136,11 +138,126 @@ func podsInDeploymentsReady(objects []string) {
 }
 
 func runKustomize(kustomizeDir string) []string {
-	command := exec.Command("kustomize", "build", kustomizeDir)
+	// Use "kubectl kustomize" rather than the standalone "kustomize" binary.
+	// CI/dev environments guarantee kubectl but may not have kustomize installed
+	// (see Makefile.tools.mk check-kustomize target).
+	command := exec.Command("kubectl", "kustomize", kustomizeDir)
 	session, err := gexec.Start(command, nil, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 	return strings.Split(string(session.Out.Contents()), "\n---")
+}
+
+// removeEmptyArgs strips YAML list items that are empty strings after variable
+// substitution (e.g. '- ""' produced when VLLM_EXTRA_ARGS_* is unset).
+func removeEmptyArgs(inputs []string) []string {
+	outputs := make([]string, len(inputs))
+	for idx, input := range inputs {
+		lines := strings.Split(input, "\n")
+		filtered := make([]string, 0, len(lines))
+		for _, line := range lines {
+			if strings.TrimSpace(line) == `- ""` {
+				continue
+			}
+			if strings.TrimSpace(line) == `-` {
+				continue
+			}
+			filtered = append(filtered, line)
+		}
+		outputs[idx] = strings.Join(filtered, "\n")
+	}
+	return outputs
+}
+
+// removeEmptyLabels strips YAML lines like "llm-d.ai/role: " where the value
+// is empty after variable substitution. Kubernetes accepts empty-value labels,
+// but the test pod-selector logic treats the key's presence as meaningful.
+func removeEmptyLabels(inputs []string) []string {
+	outputs := make([]string, len(inputs))
+	for idx, input := range inputs {
+		lines := strings.Split(input, "\n")
+		filtered := make([]string, 0, len(lines))
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			// Skip lines like "llm-d.ai/role:" (key with empty value after TrimSpace)
+			if strings.HasSuffix(trimmed, ":") {
+				if strings.Contains(trimmed, "llm-d.ai/role") {
+					continue
+				}
+			}
+			filtered = append(filtered, line)
+		}
+		outputs[idx] = strings.Join(filtered, "\n")
+	}
+	return outputs
+}
+
+func isModelReal(modelName string) bool {
+	url := "https://huggingface.co/api/models/" + modelName
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
+}
+
+// removeRenderSidecar takes a slice of YAML strings (each may contain multiple
+// objects separated by "---") and returns the same slice with the vllm-render
+// initContainer and the model-cache volume stripped from any Deployment.
+func removeRenderSidecar(inputs []string) []string {
+	outputs := make([]string, len(inputs))
+	for idx, input := range inputs {
+		docs := strings.Split(input, "\n---")
+		rendered := make([]string, 0, len(docs))
+		for _, doc := range docs {
+			if strings.TrimSpace(doc) == "" {
+				continue
+			}
+			rendered = append(rendered, filterDocument(doc))
+		}
+		outputs[idx] = strings.Join(rendered, "\n---\n")
+	}
+	return outputs
+}
+
+func filterDocument(doc string) string {
+	obj := &unstructured.Unstructured{}
+	err := yaml.Unmarshal([]byte(doc), &obj.Object)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	if len(obj.Object) == 0 {
+		return doc
+	}
+	if obj.GetKind() == "Deployment" {
+		removePodSpecListItem(obj, "initContainers", "vllm-render")
+		removePodSpecListItem(obj, "volumes", "model-cache")
+	}
+	out, err := yaml.Marshal(obj.Object)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	return strings.TrimRight(string(out), "\n")
+}
+
+func removePodSpecListItem(obj *unstructured.Unstructured, fieldName, itemName string) {
+	path := []string{"spec", "template", "spec", fieldName}
+	items, found, err := unstructured.NestedSlice(obj.Object, path...)
+	if err != nil || !found {
+		return
+	}
+	filtered := make([]any, 0, len(items))
+	for _, item := range items {
+		if m, ok := item.(map[string]any); ok && m["name"] == itemName {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	if len(filtered) == 0 {
+		unstructured.RemoveNestedField(obj.Object, path...)
+		return
+	}
+	err = unstructured.SetNestedSlice(obj.Object, filtered, path...)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 }
 
 func substituteMany(inputs []string, substitutions map[string]string) []string {
@@ -156,19 +273,23 @@ func substituteMany(inputs []string, substitutions map[string]string) []string {
 }
 
 // getCounterMetric fetches the current value of a Prometheus counter metric from the given metrics URL.
+// Retries on transient connection errors (e.g. the previous EPP pod is still terminating).
 //
 //nolint:unparam // metricName may vary in future test cases
 func getCounterMetric(metricsURL, metricName, labelMatch string) int {
-	resp, err := http.Get(metricsURL)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer func() {
-		err = resp.Body.Close()
-		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-	}()
-	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
-
-	body, err := io.ReadAll(resp.Body)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	var body []byte
+	gomega.Eventually(func() error {
+		resp, err := http.Get(metricsURL)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status %d", resp.StatusCode)
+		}
+		body, err = io.ReadAll(resp.Body)
+		return err
+	}, 10*time.Second, 1*time.Second).Should(gomega.Succeed())
 
 	metricsText := string(body)
 	for _, line := range strings.Split(metricsText, "\n") {
@@ -280,6 +401,36 @@ func dumpPodsAndLogs() {
 	}
 
 	ginkgo.GinkgoWriter.Printf("Total pods found: %d\n\n", len(pods.Items))
+
+	// Print summary table (like kubectl get pods)
+	ginkgo.GinkgoWriter.Printf("%-55s %-8s %-22s %-8s %-6s\n", "NAME", "READY", "STATUS", "RESTARTS", "AGE")
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		ready, total := 0, len(pod.Spec.Containers)
+		restarts := int32(0)
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.Ready {
+				ready++
+			}
+			restarts += cs.RestartCount
+		}
+		status := string(pod.Status.Phase)
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.State.Waiting != nil {
+				status = cs.State.Waiting.Reason
+				break
+			}
+		}
+		age := ""
+		if !pod.CreationTimestamp.IsZero() {
+			d := time.Since(pod.CreationTimestamp.Time).Round(time.Second)
+			age = d.String()
+		}
+		ginkgo.GinkgoWriter.Printf("%-55s %-8s %-22s %-8d %-6s\n",
+			pod.Name, fmt.Sprintf("%d/%d", ready, total), status, restarts, age)
+	}
+	ginkgo.GinkgoWriter.Println()
+
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		ginkgo.GinkgoWriter.Printf("--- Pod: %s | Phase: %s | Node: %s ---\n",

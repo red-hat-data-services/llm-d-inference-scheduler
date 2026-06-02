@@ -25,22 +25,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/picker"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/picker/maxscore"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profile"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/loraaffinity"
-	schedprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/prefix"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/queuedepth"
+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/picker"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/picker/maxscore"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/profilehandler/single"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/loraaffinity"
+	schedprefix "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/prefix"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/queuedepth"
 )
 
 // Tests the default scheduler configuration and expected behavior.
 func TestSchedule(t *testing.T) {
 	kvCacheUtilizationScorer := kvcacheutilization.NewKVCacheUtilizationScorer()
 	queueingScorer := queuedepth.NewQueueScorer()
-	prefixCacheScorer, err := schedprefix.New(context.Background())
+	prefixCacheScorer, err := schedprefix.New(context.Background(), schedprefix.PrefixCacheScorerPluginType, "approx-prefix-cache-producer")
 	assert.NoError(t, err)
 	loraAffinityScorer := loraaffinity.NewLoraAffinityScorer()
 
@@ -52,7 +52,7 @@ func TestSchedule(t *testing.T) {
 		).
 		WithPicker(maxscore.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 
-	profileHandler := profile.NewSingleProfileHandler()
+	profileHandler := single.NewSingleProfileHandler()
 
 	schedulerConfig := NewSchedulerConfig(profileHandler, map[string]fwksched.SchedulerProfile{"default": defaultProfile})
 
@@ -66,7 +66,7 @@ func TestSchedule(t *testing.T) {
 		{
 			name: "no candidate endpoints",
 			req: &fwksched.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "any-model",
 			},
 			input:   []fwksched.Endpoint{},
@@ -76,7 +76,7 @@ func TestSchedule(t *testing.T) {
 		{
 			name: "finds optimal endpoint",
 			req: &fwksched.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "critical",
 			},
 			// pod2 will be picked because it has relatively low queue size, with the requested

@@ -1,5 +1,7 @@
 # Latency SLO Admitter (`latency-slo-admitter`)
 
+**Type:** `latency-slo-admitter`
+
 Rejects sheddable requests when no endpoint can meet latency SLO constraints.
 
 ## Interface
@@ -29,7 +31,18 @@ because the predictor already neutralizes TPOT for non-streaming mode and prefil
 
 ## Dependencies
 
-- Requires `predicted-latency-producer` to run first (in PrepareRequestData) to populate
+- Requires `predicted-latency-producer` to run first (in Produce) to populate
   `LatencyPredictionInfo` attributes on endpoints.
 - Reads `DispatchedRequestCount` from the same attributes for idle detection.
 - Reads `KVCacheUsagePercent` from endpoint metrics for cold detection.
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: latency-slo-admitter
+    name: latency-admitter
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: latency-admitter
+```

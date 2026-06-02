@@ -16,48 +16,73 @@ limitations under the License.
 
 package eviction
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+
+	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
+)
+
+// evictionEntry holds the eviction channel and an optional reason for the eviction.
+type evictionEntry struct {
+	ch     chan struct{}
+	reason atomic.Value // stores errcommon.RequestDroppedReason
+}
 
 // EvictionRegistry is a shared registry that maps request IDs to eviction channels.
-// It bridges the eviction plugin (which decides what to evict) and the ext_proc Process()
+// It bridges the RequestEvictor (which decides what to evict) and the ext_proc Process()
 // goroutine (which owns the stream needed to send ImmediateResponse).
 //
 // Lifecycle:
-//   - PreRequest: plugin creates an eviction channel and registers it via Register().
+//   - PreRequest: RequestEvictor creates an eviction channel and registers it via Register().
 //   - Process(): after HandleRequest returns, looks up the channel via Get() and selects on it.
 //   - EvictN: evictor closes the channel via the EvictionItem.EvictCh reference.
 //   - Process() defer: removes the channel via Deregister().
 //
 // All methods are goroutine-safe.
 type EvictionRegistry struct {
-	mu       sync.RWMutex
-	channels map[string]chan struct{} // requestID → eviction channel
+	entries sync.Map // requestID (string) → *evictionEntry
 }
 
 // NewEvictionRegistry creates a new EvictionRegistry.
 func NewEvictionRegistry() *EvictionRegistry {
-	return &EvictionRegistry{
-		channels: make(map[string]chan struct{}),
-	}
+	return &EvictionRegistry{}
 }
 
 // Register stores an eviction channel for the given request ID.
 func (r *EvictionRegistry) Register(requestID string, ch chan struct{}) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.channels[requestID] = ch
+	r.entries.Store(requestID, &evictionEntry{ch: ch})
 }
 
 // Get returns the eviction channel for the given request ID, or nil if not found.
 func (r *EvictionRegistry) Get(requestID string) chan struct{} {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.channels[requestID]
+	v, ok := r.entries.Load(requestID)
+	if !ok {
+		return nil
+	}
+	return v.(*evictionEntry).ch
 }
 
-// Deregister removes the eviction channel for the given request ID.
+// SetReason records the eviction reason for a request before the channel is closed.
+func (r *EvictionRegistry) SetReason(requestID string, reason errcommon.RequestDroppedReason) {
+	v, ok := r.entries.Load(requestID)
+	if !ok {
+		return
+	}
+	v.(*evictionEntry).reason.Store(reason)
+}
+
+// GetReason returns the eviction reason for a request, or empty string if not found.
+func (r *EvictionRegistry) GetReason(requestID string) errcommon.RequestDroppedReason {
+	v, ok := r.entries.Load(requestID)
+	if !ok {
+		return ""
+	}
+	reason, _ := v.(*evictionEntry).reason.Load().(errcommon.RequestDroppedReason)
+	return reason
+}
+
+// Deregister removes the eviction entry for the given request ID.
 func (r *EvictionRegistry) Deregister(requestID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.channels, requestID)
+	r.entries.Delete(requestID)
 }

@@ -8,11 +8,11 @@ import (
 	"github.com/google/go-cmp/cmp"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	sessionaffinity "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/sessionaffinity"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	sessionaffinity "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/sessionaffinity"
+	"github.com/llm-d/llm-d-router/test/utils"
 )
 
 func TestSessionAffinity_Score(t *testing.T) {
@@ -86,7 +86,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			gotScores := sessionAffinityScorer.Score(context.Background(), nil, test.req, test.input)
+			gotScores := sessionAffinityScorer.Score(context.Background(), test.req, test.input)
 
 			if diff := cmp.Diff(test.wantScores, gotScores); diff != "" {
 				t.Errorf("Unexpected output (-want +got): %v", diff)
@@ -113,25 +113,25 @@ func TestSessionAffinity_ResponseBody(t *testing.T) {
 	}{
 		{
 			name:            "standard case with existing headers map",
-			initialResponse: &requestcontrol.Response{RequestId: "req-1", Headers: make(map[string]string), EndOfStream: true},
+			initialResponse: &requestcontrol.Response{RequestID: "req-1", Headers: make(map[string]string), EndOfStream: true},
 			targetPod:       targetEndpoint,
 			wantHeaders:     map[string]string{"x-session-token": wantToken},
 		},
 		{
 			name:            "response with nil headers map",
-			initialResponse: &requestcontrol.Response{RequestId: "req-2", Headers: nil, EndOfStream: true},
+			initialResponse: &requestcontrol.Response{RequestID: "req-2", Headers: nil, EndOfStream: true},
 			targetPod:       targetEndpoint,
 			wantHeaders:     map[string]string{"x-session-token": wantToken},
 		},
 		{
 			name:            "nil targetPod should do nothing",
-			initialResponse: &requestcontrol.Response{RequestId: "req-3", Headers: make(map[string]string), EndOfStream: true},
+			initialResponse: &requestcontrol.Response{RequestID: "req-3", Headers: make(map[string]string), EndOfStream: true},
 			targetPod:       nil,
 			wantHeaders:     map[string]string{},
 		},
 		{
 			name:            "incomplete response should do nothing (EndOfStream=false)",
-			initialResponse: &requestcontrol.Response{RequestId: "req-4", Headers: make(map[string]string), EndOfStream: false},
+			initialResponse: &requestcontrol.Response{RequestID: "req-4", Headers: make(map[string]string), EndOfStream: false},
 			targetPod:       targetEndpoint,
 			wantHeaders:     map[string]string{},
 		},
