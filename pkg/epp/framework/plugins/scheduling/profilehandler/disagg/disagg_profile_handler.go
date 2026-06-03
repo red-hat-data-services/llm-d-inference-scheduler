@@ -6,17 +6,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	dl_prefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	attrprefix "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	"github.com/llm-d/llm-d-router/pkg/metrics"
+	"github.com/llm-d/llm-d-router/pkg/telemetry"
 )
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -98,29 +102,36 @@ func (l *legacyDisaggProfileHandlerParameters) toDisaggParams(logger logr.Logger
 //
 //	if parameters.deciders.prefill is set - P disaggregation will be supported
 //	if parameters.deciders.encode is set - E disaggregation will be supported
-func HandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+func HandlerFactory(name string, rawParameters *json.Decoder, handle plugin.Handle) (plugin.Plugin, error) {
 	logger := log.FromContext(handle.Context())
 
 	parameters := disaggProfileHandlerParameters{}
 	if rawParameters != nil {
-		legacy := legacyDisaggProfileHandlerParameters{}
-
-		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+		// Capture raw bytes once so we can try each schema independently with
+		// strict decoding. The decoder passed in is one-shot, so we re-read
+		// from these bytes for the second attempt.
+		var raw json.RawMessage
+		if err := rawParameters.Decode(&raw); err != nil {
 			return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
 		}
-		if err := json.Unmarshal(rawParameters, &legacy); err != nil {
-			return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
-		}
 
-		if parameters.Profiles != (disaggProfilesParameters{}) ||
-			parameters.Deciders != (disaggDecidersParameters{}) {
-			// Make sure the legacy parameters were not used
-			if legacy != (legacyDisaggProfileHandlerParameters{}) {
-				return nil, errors.New("cannot mix deprecated flat parameters (decodeProfile, prefillProfile, encodeProfile, " +
-					"deciderPluginName, prefillDeciderPluginName, encodeDeciderPluginName) " +
-					"with nested parameters (profiles, deciders): use one format or the other")
+		// Try the new (nested) schema strictly first. If the user supplied
+		// only new-format fields, this succeeds. Per #1068, deprecated
+		// (legacy flat) fields are not in the new struct, so they would
+		// produce "unknown field" errors here — that's the signal to fall
+		// back to the legacy schema.
+		errNew := plugin.StrictDecoder(raw).Decode(&parameters)
+		if errNew != nil {
+			legacy := legacyDisaggProfileHandlerParameters{}
+			if errLegacy := plugin.StrictDecoder(raw).Decode(&legacy); errLegacy != nil {
+				// Neither schema parses cleanly: either mixed schemas or a
+				// genuinely unknown field. Surface both errors so callers can
+				// tell which they meant.
+				return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler: "+
+					"nested schema error: %w; legacy schema error: %v "+
+					"(use one format exclusively: either nested profiles/deciders or the deprecated flat fields)",
+					errNew, errLegacy)
 			}
-		} else {
 			logger.Info("Deprecated: using flat parameter format, migrate to nested profiles/deciders format")
 			parameters = legacy.toDisaggParams(logger)
 		}
@@ -187,8 +198,11 @@ func NewDisaggProfileHandler(decodeProfile, prefillProfile, encodeProfile string
 
 // ── Shared implementation ───────────────────────────────────────────────────
 
-// compile-time assertion
-var _ scheduling.ProfileHandler = &Handler{}
+// compile-time assertions
+var (
+	_ scheduling.ProfileHandler = &Handler{}
+	_ requestcontrol.PreRequest = &Handler{}
+)
 
 // Handler is the unified disaggregation profile handler.
 // It drives one or more of the following stages, each optional except decode:
@@ -218,8 +232,10 @@ func (h *Handler) WithName(name string) *Handler {
 }
 
 // Consumes defines data types consumed by this plugin (through the PD decider).
-func (*Handler) Consumes() map[string]any {
-	return map[string]any{dl_prefix.PrefixCacheMatchInfoKey: dl_prefix.PrefixCacheMatchInfo{}}
+func (*Handler) Consumes() plugin.DataDependencies {
+	return plugin.DataDependencies{
+		Required: map[plugin.DataKey]any{attrprefix.PrefixCacheMatchInfoDataKey: attrprefix.PrefixCacheMatchInfo{}},
+	}
 }
 
 func newDisaggProfileHandler(handlerType, decodeProfile, prefillProfile, encodeProfile string, pdDecider, encodeDecider deciderPlugin) *Handler {
@@ -236,7 +252,7 @@ func newDisaggProfileHandler(handlerType, decodeProfile, prefillProfile, encodeP
 // Pick implements scheduling.ProfileHandler.
 // Stages run in order: decode → encode (optional) → prefill (optional).
 // Returns the next profile to execute, or an empty map when all stages are done.
-func (h *Handler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.InferenceRequest, profiles map[string]scheduling.SchedulerProfile,
+func (h *Handler) Pick(ctx context.Context, request *scheduling.InferenceRequest, profiles map[string]scheduling.SchedulerProfile,
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 	tracer := telemetry.Tracer()
 	ctx, span := tracer.Start(ctx, "llm_d.epp.disagg.profile_handler.pick",
@@ -252,7 +268,7 @@ func (h *Handler) Pick(ctx context.Context, _ *scheduling.CycleState, request *s
 	if request.TargetModel != "" {
 		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
 	}
-	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestID))
 
 	// ── Stage 1: Decode ────────────────────────────────────────────────────
 	if _, executed := profileResults[h.decodeProfile]; !executed {
@@ -315,7 +331,6 @@ func (h *Handler) Pick(ctx context.Context, _ *scheduling.CycleState, request *s
 // Builds the final SchedulingResult from whichever stages ran successfully.
 func (h *Handler) ProcessResults(
 	_ context.Context,
-	_ *scheduling.CycleState,
 	request *scheduling.InferenceRequest,
 	profileResults map[string]*scheduling.ProfileRunResult,
 ) (*scheduling.SchedulingResult, error) {
@@ -344,4 +359,94 @@ func (h *Handler) ProcessResults(
 		PrimaryProfileName: h.decodeProfile,
 		ProfileResults:     updatedResults,
 	}, nil
+}
+
+// ── PreRequest ──────────────────────────────────────────────────────────────
+
+// PreRequest wires prefill and encode SchedulerProfile results into headers
+// so the sidecar knows which pods to contact for disaggregated work.
+func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) {
+	tracer := telemetry.Tracer()
+	_, span := tracer.Start(ctx, "llm_d.epp.prerequest.disaggregation",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	if request == nil {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
+			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
+			attribute.String("llm_d.epp.disagg.reason", "request_is_nil"),
+		)
+		return
+	}
+	if schedulingResult == nil {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
+			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
+			attribute.String("llm_d.epp.disagg.reason", "scheduling_result_is_nil"),
+		)
+		return
+	}
+
+	if request.TargetModel != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
+	}
+	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestID))
+
+	// Prefill header
+	delete(request.Headers, routing.PrefillEndpointHeader)
+	prefillProfileRunResult := schedulingResult.ProfileResults[h.prefillProfile]
+	switch {
+	case prefillProfileRunResult == nil:
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
+			attribute.String("llm_d.epp.pd.reason", "no_prefill_profile_result"),
+		)
+	case len(prefillProfileRunResult.TargetEndpoints) == 0:
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
+			attribute.String("llm_d.epp.pd.reason", "no_prefill_profile_target_endpoints"),
+		)
+	default:
+		targetPod := prefillProfileRunResult.TargetEndpoints[0].GetMetadata()
+		prefillHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
+		request.Headers[routing.PrefillEndpointHeader] = prefillHostPort
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", true),
+			attribute.String("llm_d.epp.pd.prefill_pod_address", targetPod.Address),
+			attribute.String("llm_d.epp.pd.prefill_pod_port", targetPod.Port),
+		)
+	}
+
+	// Encode header
+	delete(request.Headers, routing.EncoderEndpointsHeader)
+	encodeProfileRunResult := schedulingResult.ProfileResults[h.encodeProfile]
+	if encodeProfileRunResult == nil {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
+			attribute.String("llm_d.epp.encode.reason", "no_encode_profile_result"),
+		)
+		return
+	}
+
+	var encodeHostPorts []string
+	for _, endpoint := range encodeProfileRunResult.TargetEndpoints {
+		targetEndpoint := endpoint.GetMetadata()
+		encodeHostPort := net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
+		encodeHostPorts = append(encodeHostPorts, encodeHostPort)
+	}
+	if len(encodeHostPorts) == 0 {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
+			attribute.String("llm_d.epp.encode.reason", "no_encode_profile_target_endpoints"),
+		)
+		return
+	}
+
+	request.Headers[routing.EncoderEndpointsHeader] = strings.Join(encodeHostPorts, ",")
+	span.SetAttributes(
+		attribute.Bool("llm_d.epp.encode.disaggregation_used", true),
+		attribute.String("llm_d.epp.encode.endpoints", strings.Join(encodeHostPorts, ",")),
+	)
 }

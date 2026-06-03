@@ -18,24 +18,22 @@ package loader
 
 import (
 	"fmt"
-	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/registry"
-	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	extractormetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/metrics"
-	sourcemetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/metrics"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/saturationdetector/utilization"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/openai"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/picker/maxscore"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profile"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/prefix"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/queuedepth"
+	configapi "github.com/llm-d/llm-d-router/apix/config/v1alpha1"
+	"github.com/llm-d/llm-d-router/pkg/epp/flowcontrol/registry"
+	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
+	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	extractormetrics "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/metrics"
+	sourcemetrics "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/source/metrics"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/saturationdetector/utilization"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/openai"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/picker/maxscore"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/profilehandler/single"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/prefix"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/queuedepth"
 )
 
 // DefaultScorerWeight is the weight used for scorers referenced in the configuration without explicit weights.
@@ -49,7 +47,7 @@ func loadDefaultConfig() *configapi.EndpointPickerConfig {
 	prefixCacheScorerWeight := 3.0
 	return &configapi.EndpointPickerConfig{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "inference.networking.x-k8s.io/v1alpha1",
+			APIVersion: configapi.GroupVersion.String(),
 			Kind:       "EndpointPickerConfig",
 		},
 		FeatureGates: []string{}, // Data layer is now enabled by default (no feature gate needed)
@@ -153,7 +151,7 @@ func ensureSchedulingLayer(
 		// Auto-populate the default profile with all Filter, Scorer, and Picker plugins found.
 		for name, p := range allPlugins {
 			switch p.(type) {
-			case framework.Filter, framework.Scorer, framework.Picker:
+			case fwksched.Filter, fwksched.Scorer, fwksched.Picker:
 				defaultProfile.Plugins = append(defaultProfile.Plugins, configapi.SchedulingPlugin{PluginRef: name})
 			}
 		}
@@ -164,13 +162,13 @@ func ensureSchedulingLayer(
 	if len(cfg.SchedulingProfiles) == 1 {
 		hasHandler := false
 		for _, p := range allPlugins {
-			if _, ok := p.(framework.ProfileHandler); ok {
+			if _, ok := p.(fwksched.ProfileHandler); ok {
 				hasHandler = true
 				break
 			}
 		}
 		if !hasHandler {
-			if err := registerDefaultPlugin(cfg, handle, profile.SingleProfileHandlerType); err != nil {
+			if err := registerDefaultPlugin(cfg, handle, single.SingleProfileHandlerType); err != nil {
 				return err
 			}
 		}
@@ -179,7 +177,7 @@ func ensureSchedulingLayer(
 	// Find or Create a default MaxScorePicker to reuse across profiles.
 	var maxScorePickerName string
 	for name, p := range allPlugins {
-		if _, ok := p.(framework.Picker); ok {
+		if _, ok := p.(fwksched.Picker); ok {
 			maxScorePickerName = name
 			break
 		}
@@ -197,11 +195,11 @@ func ensureSchedulingLayer(
 		for j, pluginRef := range prof.Plugins {
 			p := handle.Plugin(pluginRef.PluginRef)
 
-			if _, ok := p.(framework.Scorer); ok && pluginRef.Weight == nil {
+			if _, ok := p.(fwksched.Scorer); ok && pluginRef.Weight == nil {
 				cfg.SchedulingProfiles[i].Plugins[j].Weight = &defaultScorerWeight
 			}
 
-			if _, ok := p.(framework.Picker); ok {
+			if _, ok := p.(fwksched.Picker); ok {
 				hasPicker = true
 			}
 		}
@@ -244,13 +242,16 @@ func ensureParser(
 	handle fwkplugin.Handle,
 	allPlugins map[string]fwkplugin.Plugin,
 ) error {
-	parserConfig := cfg.Parser
+	if cfg.RequestHandler == nil {
+		cfg.RequestHandler = &configapi.RequestHandlerConfig{}
+	}
+	parserConfig := cfg.RequestHandler.Parser
 	if parserConfig == nil {
 		parserConfig = &configapi.ParserConfig{
 			// Set default parser to openAI parser if the parser is not set in the config.
 			PluginRef: openai.OpenAIParserType,
 		}
-		cfg.Parser = parserConfig
+		cfg.RequestHandler.Parser = parserConfig
 	}
 	if _, ok := allPlugins[parserConfig.PluginRef]; !ok {
 		if err := registerDefaultPlugin(cfg, handle, openai.OpenAIParserType); err != nil {
@@ -267,12 +268,15 @@ func ensureSaturationDetector(
 	handle fwkplugin.Handle,
 	allPlugins map[string]fwkplugin.Plugin,
 ) error {
-	sdConfig := cfg.SaturationDetector
+	if cfg.FlowControl == nil {
+		cfg.FlowControl = &configapi.FlowControlConfig{}
+	}
+	sdConfig := cfg.FlowControl.SaturationDetector
 	if sdConfig == nil {
 		sdConfig = &configapi.SaturationDetectorConfig{
 			PluginRef: utilization.UtilizationDetectorType,
 		}
-		cfg.SaturationDetector = sdConfig
+		cfg.FlowControl.SaturationDetector = sdConfig
 	}
 	if sdConfig.PluginRef == "" {
 		sdConfig.PluginRef = utilization.UtilizationDetectorType
@@ -288,16 +292,14 @@ func ensureSaturationDetector(
 	return nil
 }
 
-// ensureDataLayer guarantees that the data layer is configured unless explicitly disabled.
-// If no data section is provided, the default plugins are added.
-// If a data section is explicitly provided (even empty), it is left unchanged — an empty section
-// disables metrics collection without falling back to legacy.
+// ensureDataLayer additively injects the default metrics source and extractor unless opted out.
+// Unlike other ensureXxx functions, it checks for explicit opt-out via InjectDefaults and avoids
+// double-injection when the metrics source is already present in a user-supplied config.
 func ensureDataLayer(cfg *configapi.EndpointPickerConfig, handle fwkplugin.Handle, allPlugins map[string]fwkplugin.Plugin) error {
-	if slices.Contains(cfg.FeatureGates, datalayer.EnableLegacyMetricsFeatureGate) {
+	if cfg.DataLayer != nil && cfg.DataLayer.InjectDefaults != nil && !*cfg.DataLayer.InjectDefaults {
 		return nil
 	}
-
-	if cfg.DataLayer != nil {
+	if cfg.DataLayer != nil && hasSourceOfType(cfg.DataLayer, sourcemetrics.MetricsDataSourceType) {
 		return nil
 	}
 
@@ -312,16 +314,26 @@ func ensureDataLayer(cfg *configapi.EndpointPickerConfig, handle fwkplugin.Handl
 		}
 	}
 
-	cfg.DataLayer = &configapi.DataLayerConfig{
-		Sources: []configapi.DataLayerSource{{
-			PluginRef: sourcemetrics.MetricsDataSourceType,
-			Extractors: []configapi.DataLayerExtractor{{
-				PluginRef: extractormetrics.MetricsExtractorType,
-			}},
-		}},
+	if cfg.DataLayer == nil {
+		cfg.DataLayer = &configapi.DataLayerConfig{}
 	}
+	cfg.DataLayer.Sources = append(cfg.DataLayer.Sources, configapi.DataLayerSource{
+		PluginRef: sourcemetrics.MetricsDataSourceType,
+		Extractors: []configapi.DataLayerExtractor{{
+			PluginRef: extractormetrics.MetricsExtractorType,
+		}},
+	})
 
 	return nil
+}
+
+func hasSourceOfType(dl *configapi.DataLayerConfig, pluginType string) bool {
+	for _, s := range dl.Sources {
+		if s.PluginRef == pluginType {
+			return true
+		}
+	}
+	return false
 }
 
 // registerDefaultPlugin instantiates a plugin with empty configuration (defaults) and adds it to both the handle and
@@ -337,7 +349,7 @@ func registerDefaultPlugin(
 		return fmt.Errorf("plugin type '%s' not found in registry", pluginType)
 	}
 
-	plugin, err := factory(name, nil, handle)
+	plugin, err := factory(name, nil, handle) // default plugins have no parameters
 	if err != nil {
 		return fmt.Errorf("failed to instantiate default plugin '%s': %w", name, err)
 	}

@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
+	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-router/test/utils"
 )
 
 // Helper functions
@@ -32,7 +32,7 @@ func createEndpoint(nsn k8stypes.NamespacedName, ipaddr string, labels map[strin
 
 func createRequest() *scheduling.InferenceRequest {
 	return &scheduling.InferenceRequest{
-		RequestId: "test-request",
+		RequestID: "test-request",
 	}
 }
 
@@ -69,7 +69,7 @@ func TestFactory(t *testing.T) {
 			if tt.jsonParams != "" {
 				rawParams = json.RawMessage(tt.jsonParams)
 			}
-			plugin, err := Factory(tt.pluginName, rawParams, nil)
+			plugin, err := Factory(tt.pluginName, fwkplugin.StrictDecoder(rawParams), nil)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -108,7 +108,7 @@ func TestContextLengthAwareFilter(t *testing.T) {
 	request := createRequest()
 
 	// With empty request body, context length is 0, matches 0-100 and 0-2000 ranges
-	filteredEndpoints := plugin.Filter(ctx, nil, request, endpoints)
+	filteredEndpoints := plugin.Filter(ctx, request, endpoints)
 
 	gotNames := make([]string, len(filteredEndpoints))
 	for i, endpoint := range filteredEndpoints {
@@ -144,7 +144,7 @@ func TestContextLengthAwareScore(t *testing.T) {
 	plugin := NewContextLengthAware("test-scorer", params)
 	request := createRequest()
 
-	scores := plugin.Score(ctx, nil, request, endpoints)
+	scores := plugin.Score(ctx, request, endpoints)
 
 	// With context length 0:
 	// - tight-range (0-20): in-range, should score high (> 0.3)
@@ -241,9 +241,10 @@ func TestCalculateRangeScoreFallback(t *testing.T) {
 	})
 }
 
-// TokenizedPrompt tests — plugin reads tokens from CycleState (written by the tokenizer scorer)
+// TokenizedPrompt tests — plugin reads tokens from InferenceRequestBody.TokenizedPrompt
+// as populated by the tokenizer DataProducer plugin.
 
-func TestContextLengthAwareWithTokenizedPromptInCycleState(t *testing.T) {
+func TestContextLengthAwareWithTokenizedPromptOnRequest(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	tokenCount := 42
@@ -263,30 +264,61 @@ func TestContextLengthAwareWithTokenizedPromptInCycleState(t *testing.T) {
 	}
 	plugin := NewContextLengthAware("test-tokenized", params)
 
-	// Simulate tokenizer scorer having written TokenizedPromptState to CycleState
 	tokenIDs := make([]uint32, tokenCount)
 	for i := range tokenIDs {
 		tokenIDs[i] = uint32(i + 1)
 	}
 
-	cycleState := scheduling.NewCycleState()
-	cycleState.Write(tokenizer.TokenizedPromptStateKey, &tokenizer.TokenizedPromptState{
-		TokenIDs: tokenIDs,
-	})
-
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-request",
+		RequestID:   "test-request",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
 				Prompt: fwkrh.Prompt{Raw: "some prompt text"},
 			},
+			TokenizedPrompt: &fwkrh.TokenizedPrompt{TokenIDs: tokenIDs},
 		},
 	}
 
-	filteredEndpoints := plugin.Filter(ctx, cycleState, request, endpoints)
+	filteredEndpoints := plugin.Filter(ctx, request, endpoints)
 	assert.Equal(t, 1, len(filteredEndpoints))
 	assert.Equal(t, "tight-match", filteredEndpoints[0].GetMetadata().NamespacedName.Name)
+}
+
+func TestContextLengthAwareGenerateRequest(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+
+	// Generate request carries exact token IDs — estimateContextLength uses len(TokenIDs) directly.
+	tokenIDs := []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10} // 10 tokens
+
+	endpoints := []scheduling.Endpoint{
+		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "matching-range"},
+			"10.0.0.1",
+			map[string]string{DefaultContextLengthLabel: "5-20"}),
+		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "non-matching-range"},
+			"10.0.0.2",
+			map[string]string{DefaultContextLengthLabel: "100-200"}),
+	}
+
+	params := &contextLengthAwareParameters{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: true,
+	}
+	plugin := NewContextLengthAware("test-generate", params)
+
+	request := &scheduling.InferenceRequest{
+		RequestID:   "test-request",
+		TargetModel: "test-model",
+		Body: &fwkrh.InferenceRequestBody{
+			Generate: &fwkrh.GenerateRequest{
+				TokenIDs: tokenIDs,
+			},
+		},
+	}
+
+	filteredEndpoints := plugin.Filter(ctx, request, endpoints)
+	assert.Equal(t, 1, len(filteredEndpoints))
+	assert.Equal(t, "matching-range", filteredEndpoints[0].GetMetadata().NamespacedName.Name)
 }
 
 func TestContextLengthAwareFallbackWithoutTokenizedPrompt(t *testing.T) {
@@ -311,7 +343,7 @@ func TestContextLengthAwareFallbackWithoutTokenizedPrompt(t *testing.T) {
 	plugin := NewContextLengthAware("test-fallback", params)
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-request",
+		RequestID:   "test-request",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -320,7 +352,7 @@ func TestContextLengthAwareFallbackWithoutTokenizedPrompt(t *testing.T) {
 		},
 	}
 
-	filteredEndpoints := plugin.Filter(ctx, nil, request, endpoints)
+	filteredEndpoints := plugin.Filter(ctx, request, endpoints)
 	assert.Equal(t, 1, len(filteredEndpoints))
 	assert.Equal(t, "matching-range", filteredEndpoints[0].GetMetadata().NamespacedName.Name)
 }

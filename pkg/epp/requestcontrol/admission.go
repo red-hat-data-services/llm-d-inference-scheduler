@@ -23,14 +23,14 @@ import (
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
-	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/contracts"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/types"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/handlers"
-	requtil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/request"
+	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
+	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/epp/flowcontrol/contracts"
+	"github.com/llm-d/llm-d-router/pkg/epp/flowcontrol/types"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
+	requtil "github.com/llm-d/llm-d-router/pkg/epp/util/request"
 )
 
 // AdmissionController defines the interface for making admission control decisions.
@@ -73,7 +73,7 @@ func rejectIfSheddableAndSaturated(
 	if requtil.IsSheddable(priority) {
 		if sd.Saturation(ctx, endpointCandidates.Locate(ctx, reqCtx.Request.Metadata)) >= 1.0 {
 			logger.V(logutil.TRACE).Info("Request rejected: system saturated and request is sheddable",
-				"requestID", reqCtx.SchedulingRequest.RequestId)
+				"requestID", reqCtx.SchedulingRequest.RequestID)
 			return errcommon.Error{
 				Code: errcommon.ResourceExhausted,
 				Msg:  "system saturated, sheddable request dropped",
@@ -113,7 +113,7 @@ func (lac *LegacyAdmissionController) Admit(
 ) error {
 	logger := log.FromContext(ctx)
 	logger.V(logutil.TRACE).Info("Executing LegacyAdmissionController",
-		"priority", priority, "fairnessID", reqCtx.FairnessID)
+		"priority", priority, "fairnessID", reqCtx.SchedulingRequest.FairnessID)
 	if err := rejectIfSheddableAndSaturated(
 		ctx,
 		lac.saturationDetector,
@@ -123,7 +123,7 @@ func (lac *LegacyAdmissionController) Admit(
 	); err != nil {
 		return err
 	}
-	logger.V(logutil.TRACE).Info("Request admitted", "requestID", reqCtx.SchedulingRequest.RequestId)
+	logger.V(logutil.TRACE).Info("Request admitted", "requestID", reqCtx.SchedulingRequest.RequestID)
 	return nil
 }
 
@@ -153,10 +153,10 @@ func (fcac *FlowControlAdmissionController) Admit(
 ) error {
 	logger := log.FromContext(ctx)
 	logger.V(logutil.TRACE).Info("Executing FlowControlAdmissionController",
-		"requestID", reqCtx.SchedulingRequest.RequestId, "priority", priority, "fairnessID", reqCtx.FairnessID)
+		"requestID", reqCtx.SchedulingRequest.RequestID, "priority", priority, "fairnessID", reqCtx.SchedulingRequest.FairnessID)
 
 	fcReq := &flowControlRequest{
-		fairnessID:        reqCtx.FairnessID,
+		fairnessID:        reqCtx.SchedulingRequest.FairnessID,
 		priority:          priority,
 		requestByteSize:   uint64(reqCtx.RequestSize),
 		inferenceRequest:  reqCtx.SchedulingRequest,
@@ -168,7 +168,7 @@ func (fcac *FlowControlAdmissionController) Admit(
 
 	outcome, err := fcac.flowController.EnqueueAndWait(ctx, fcReq)
 	logger.V(logutil.DEBUG).Info("Flow control outcome",
-		"requestID", reqCtx.SchedulingRequest.RequestId, "outcome", outcome, "error", err)
+		"requestID", reqCtx.SchedulingRequest.RequestID, "outcome", outcome, "error", err)
 	return translateFlowControlOutcome(outcome, err)
 }
 
@@ -190,10 +190,11 @@ func (r *flowControlRequest) ID() string {
 	if r.inferenceRequest == nil {
 		return ""
 	}
-	return r.inferenceRequest.RequestId
+	return r.inferenceRequest.RequestID
 }
 func (r *flowControlRequest) InitialEffectiveTTL() time.Duration { return 0 } // Use controller default.
 func (r *flowControlRequest) ByteSize() uint64                   { return r.requestByteSize }
+
 func (r *flowControlRequest) InferenceRequest() *scheduling.InferenceRequest {
 	return r.inferenceRequest
 }
@@ -207,6 +208,7 @@ func (r *flowControlRequest) TargetModelName() string {
 	}
 	return r.inferenceRequest.TargetModel
 }
+
 func (r *flowControlRequest) FlowKey() flowcontrol.FlowKey {
 	return flowcontrol.FlowKey{ID: r.fairnessID, Priority: r.priority}
 }
@@ -223,12 +225,13 @@ func translateFlowControlOutcome(outcome types.QueueOutcome, err error) error {
 	case types.QueueOutcomeDispatched:
 		return nil
 	case types.QueueOutcomeRejectedCapacity:
-		return errcommon.Error{Code: errcommon.ResourceExhausted, Msg: msg}
+		return errcommon.Error{Code: errcommon.ResourceExhausted, Msg: msg, Headers: map[string]string{errcommon.RequestDroppedReasonHeaderKey: string(errcommon.RequestDroppedReasonSaturated)}}
 	case types.QueueOutcomeEvictedTTL:
-		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "request timed out in queue: " + msg}
+		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "request timed out in queue: " + msg, Headers: map[string]string{errcommon.RequestDroppedReasonHeaderKey: string(errcommon.RequestDroppedReasonTTLExpired)}}
 	case types.QueueOutcomeEvictedContextCancelled:
-		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "client disconnected: " + msg}
+		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "client disconnected: " + msg, Headers: map[string]string{errcommon.RequestDroppedReasonHeaderKey: string(errcommon.RequestDroppedReasonContextCancelled)}}
 	case types.QueueOutcomeRejectedOther, types.QueueOutcomeEvictedOther:
+		// No x-removal-reason header: these are internal/unexpected failures, not a specific removal policy.
 		return errcommon.Error{Code: errcommon.Internal, Msg: "internal flow control error: " + msg}
 	default:
 		return errcommon.Error{Code: errcommon.Internal, Msg: "unhandled flow control outcome: " + msg}

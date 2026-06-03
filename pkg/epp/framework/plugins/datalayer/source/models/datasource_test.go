@@ -1,0 +1,58 @@
+// Package models
+package models
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/go-logr/logr"
+	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/llm-d/llm-d-router/pkg/epp/datalayer"
+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
+	extmodels "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/models"
+)
+
+func TestDatasource(t *testing.T) {
+	srcPlugin, err := ModelDataSourceFactory("models-data-source",
+		fwkplugin.StrictDecoder(json.RawMessage(`{"scheme":"https","path":"/models","insecureSkipVerify":true}`)), nil)
+	assert.Nil(t, err, "failed to create http datasource")
+	source := srcPlugin.(fwkdl.PollingDispatcher)
+
+	extPlugin, err := extmodels.ModelServerExtractorFactory("models-data-extractor", nil, nil)
+	assert.Nil(t, err, "failed to create extractor")
+
+	cfg := &datalayer.Config{
+		Sources: []datalayer.DataSourceConfig{
+			{
+				Plugin:     source,
+				Extractors: []fwkplugin.Plugin{extPlugin},
+			},
+		},
+	}
+
+	pollingInterval := 50 * time.Millisecond
+	runtime := datalayer.NewRuntime(pollingInterval)
+
+	err = runtime.Configure(cfg, logr.Logger{})
+	assert.Nil(t, err, "failed to configure runtime")
+
+	ctx := context.Background()
+	pod := &fwkdl.EndpointMetadata{
+		NamespacedName: types.NamespacedName{
+			Name:      "pod1",
+			Namespace: "default",
+		},
+		Address: "1.2.3.4:5678",
+	}
+
+	endpoint := runtime.NewEndpoint(ctx, pod)
+	assert.NotNil(t, endpoint, "failed to create endpoint")
+
+	err = source.Dispatch(ctx, endpoint)
+	assert.NotNil(t, err, "expected dispatch to fail (no real HTTP target)")
+}

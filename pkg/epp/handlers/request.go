@@ -20,6 +20,7 @@ import (
 	"context"
 	"maps"
 	"strconv"
+	"strings"
 	"time"
 
 	configPb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -28,10 +29,10 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	envoy "github.com/llm-d/llm-d-inference-scheduler/pkg/common/envoy"
-	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metadata"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/request"
+	envoy "github.com/llm-d/llm-d-router/pkg/common/envoy"
+	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
+	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
+	"github.com/llm-d/llm-d-router/pkg/epp/util/request"
 )
 
 func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *RequestContext, req *extProcPb.ProcessingRequest_RequestHeaders) error {
@@ -43,32 +44,31 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
 		// More context: https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/526
 		// The above PR will address endpoint admission, but currently any request without a body will be
 		// routed to a random upstream endpoint.
-		endpoint := s.director.GetRandomEndpoint()
-		if endpoint == nil {
-			return errcommon.Error{Code: errcommon.Internal, Msg: "no pods available in datastore"}
-		}
-		reqCtx.TargetEndpoint = endpoint.GetIPAddress() + ":" + endpoint.GetPort()
-		reqCtx.RequestSize = 0
-		reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
-		return nil
+		return s.fallbackToRandomEndpoint(ctx, reqCtx, 0)
 	}
 
 	for _, header := range req.RequestHeaders.Headers.Headers {
-		reqCtx.Request.Headers[header.Key] = envoy.GetHeaderValue(header)
-		switch header.Key {
-		case metadata.FlowFairnessIDKey:
-			reqCtx.FairnessID = reqCtx.Request.Headers[header.Key]
-		case metadata.ObjectiveKey:
-			reqCtx.ObjectiveKey = reqCtx.Request.Headers[header.Key]
-		case metadata.ModelNameRewriteKey:
-			reqCtx.TargetModelName = reqCtx.Request.Headers[header.Key]
-		}
+		reqCtx.Request.Headers[strings.ToLower(header.Key)] = envoy.GetHeaderValue(header)
 	}
 
-	if reqCtx.FairnessID == "" {
-		reqCtx.FairnessID = metadata.DefaultFairnessID
-	}
+	reqCtx.ObjectiveKey, _ = metadata.GetLowerCaseHeaderValue(reqCtx.Request.Headers, metadata.ObjectiveKey)
+	reqCtx.TargetModelName, _ = metadata.GetLowerCaseHeaderValue(reqCtx.Request.Headers, metadata.ModelNameRewriteKey)
 
+	return nil
+}
+
+func (s *StreamingServer) fallbackToRandomEndpoint(ctx context.Context, reqCtx *RequestContext, requestSize int) error {
+	endpoint := s.director.GetRandomEndpoint()
+	if endpoint == nil {
+		return errcommon.Error{Code: errcommon.Internal, Msg: "no pods available in datastore"}
+	}
+	reqCtx.TargetEndpoint = endpoint.GetIPAddress() + ":" + endpoint.GetPort()
+	reqCtx.RequestSize = requestSize
+	reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
+
+	if requestSize > 0 {
+		reqCtx.reqBodyResp = envoy.GenerateRequestBodyResponses(reqCtx.Request.RawBody)
+	}
 	return nil
 }
 

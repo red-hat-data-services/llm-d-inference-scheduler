@@ -20,20 +20,20 @@ package filtering
 import (
 	"encoding/json"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 )
 
 // SheddableFilterType only admits sheddable requests (priority < 0) into the eviction queue.
 // This uses the project-wide definition of sheddable from requtil.IsSheddable.
-const SheddableFilterType = "eviction-sheddable-filter"
+const SheddableFilterType = "sheddable-eviction-filter"
 
 func init() {
 	plugin.Register(SheddableFilterType, SheddableFilterFactory)
 }
 
 // SheddableFilterFactory creates a SheddableFilter plugin.
-func SheddableFilterFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+func SheddableFilterFactory(name string, _ *json.Decoder, _ plugin.Handle) (plugin.Plugin, error) {
 	f := &SheddableFilter{name: SheddableFilterType}
 	if name != "" {
 		f.name = name

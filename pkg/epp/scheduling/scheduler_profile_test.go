@@ -25,9 +25,9 @@ import (
 	"github.com/google/uuid"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
+	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 )
 
 func TestSchedulePlugins(t *testing.T) {
@@ -41,7 +41,7 @@ func TestSchedulePlugins(t *testing.T) {
 		ScoreRes:  0.8,
 		FilterRes: []k8stypes.NamespacedName{{Name: "pod1"}, {Name: "pod2"}},
 	}
-	tp_filterAll := &testPlugin{
+	tpFilterAll := &testPlugin{
 		TypeRes:   "filter all",
 		FilterRes: []k8stypes.NamespacedName{},
 	}
@@ -95,7 +95,7 @@ func TestSchedulePlugins(t *testing.T) {
 		{
 			name: "filter all",
 			profile: NewSchedulerProfile().
-				WithFilters(tp1, tp_filterAll).
+				WithFilters(tp1, tpFilterAll).
 				WithScorers(NewWeightedScorer(tp1, 1), NewWeightedScorer(tp2, 1)).
 				WithPicker(pickerPlugin),
 			input: []fwksched.Endpoint{
@@ -122,10 +122,10 @@ func TestSchedulePlugins(t *testing.T) {
 			// Initialize the scheduling context
 			request := &fwksched.InferenceRequest{
 				TargetModel: "test-model",
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 			}
 			// Run profile cycle
-			got, err := test.profile.Run(context.Background(), request, fwksched.NewCycleState(), test.input)
+			got, err := test.profile.Run(context.Background(), request, test.input)
 
 			// Validate error state
 			if test.err != (err != nil) {
@@ -204,13 +204,13 @@ func (tp *testPlugin) Category() fwksched.ScorerCategory {
 	return fwksched.Distribution
 }
 
-func (tp *testPlugin) Filter(_ context.Context, _ *fwksched.CycleState, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
+func (tp *testPlugin) Filter(_ context.Context, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
 	tp.FilterCallCount++
 	return findEndpoints(endpoints, tp.FilterRes...)
 
 }
 
-func (tp *testPlugin) Score(_ context.Context, _ *fwksched.CycleState, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) map[fwksched.Endpoint]float64 {
+func (tp *testPlugin) Score(_ context.Context, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) map[fwksched.Endpoint]float64 {
 	tp.ScoreCallCount++
 	scoredEndpoints := make(map[fwksched.Endpoint]float64, len(endpoints))
 	for _, endpoint := range endpoints {
@@ -220,7 +220,7 @@ func (tp *testPlugin) Score(_ context.Context, _ *fwksched.CycleState, _ *fwksch
 	return scoredEndpoints
 }
 
-func (tp *testPlugin) Pick(_ context.Context, _ *fwksched.CycleState, scoredEndpoints []*fwksched.ScoredEndpoint) *fwksched.ProfileRunResult {
+func (tp *testPlugin) Pick(_ context.Context, scoredEndpoints []*fwksched.ScoredEndpoint) *fwksched.ProfileRunResult {
 	tp.PickCallCount++
 	tp.NumOfPickerCandidates = len(scoredEndpoints)
 
@@ -398,10 +398,10 @@ func TestRunWithOutOfRangeScores(t *testing.T) {
 
 	request := &fwksched.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 	}
 
-	_, err := profile.Run(context.Background(), request, fwksched.NewCycleState(), input)
+	_, err := profile.Run(context.Background(), request, input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -450,10 +450,10 @@ func TestFilterExecutionOrder(t *testing.T) {
 
 	request := &fwksched.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 	}
 
-	_, err := profile.Run(context.Background(), request, fwksched.NewCycleState(), input)
+	_, err := profile.Run(context.Background(), request, input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -494,10 +494,10 @@ func TestFilterExecutionOrderViaAddPlugins(t *testing.T) {
 
 	request := &fwksched.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 	}
 
-	_, err := profile.Run(context.Background(), request, fwksched.NewCycleState(), input)
+	_, err := profile.Run(context.Background(), request, input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -546,10 +546,10 @@ func TestFilterChainReceivesPreviousOutput(t *testing.T) {
 
 	request := &fwksched.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 	}
 
-	_, err := profile.Run(context.Background(), request, fwksched.NewCycleState(), input)
+	_, err := profile.Run(context.Background(), request, input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -570,7 +570,7 @@ func (f *orderTrackingFilter) TypedName() fwkplugin.TypedName {
 	return fwkplugin.TypedName{Name: f.name, Type: f.name}
 }
 
-func (f *orderTrackingFilter) Filter(_ context.Context, _ *fwksched.CycleState, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
+func (f *orderTrackingFilter) Filter(_ context.Context, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
 	*f.executionOrder = append(*f.executionOrder, f.name)
 	return endpoints // pass-through
 }
@@ -585,7 +585,7 @@ func (f *countingFilter) TypedName() fwkplugin.TypedName {
 	return fwkplugin.TypedName{Name: f.name, Type: f.name}
 }
 
-func (f *countingFilter) Filter(_ context.Context, _ *fwksched.CycleState, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
+func (f *countingFilter) Filter(_ context.Context, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
 	*f.receivedCount = len(endpoints)
 	return endpoints // pass-through
 }
@@ -599,7 +599,7 @@ func (p *filterOnlyPlugin) TypedName() fwkplugin.TypedName {
 	return p.typedName
 }
 
-func (p *filterOnlyPlugin) Filter(_ context.Context, _ *fwksched.CycleState, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
+func (p *filterOnlyPlugin) Filter(_ context.Context, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
 	return endpoints
 }
 

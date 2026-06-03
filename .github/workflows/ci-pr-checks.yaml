@@ -13,11 +13,16 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check-changes:
     runs-on: ubuntu-latest
     outputs:
       src: ${{ steps.filter.outputs.src }}
+      helm: ${{ steps.filter.outputs.helm }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
@@ -31,41 +36,77 @@ jobs:
               - Makefile*
               - go.mod
               - scripts/**
-  lint-and-test:
+              - .github/workflows/ci-pr-checks.yaml
+            helm:
+              - 'config/charts/**'
+              - 'hack/verify-helm.sh'
+  verify-helm-charts:
     needs: check-changes
-    if: ${{ needs.check-changes.outputs.src == 'true' }}
+    if: ${{ needs.check-changes.outputs.helm == 'true' && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run make verify-helm-charts
+        run: make verify-helm-charts
+
+  test:
+    needs: check-changes
+    if: ${{ needs.check-changes.outputs.src == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GO_MOD_CACHE_VOL: /home/runner/.cache/llm-d-gomodcache
+      GO_BUILD_CACHE_VOL: /home/runner/.cache/llm-d-gobuildcache
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      # Custom profile with directory-only removals (run in parallel, no apt).
+      # The cleanup-profile: max is much more aggressive, it cleanups around 41GB,
+      # but runs 3.5 mins
+      - name: Free disk space
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+        with:
+          cleanup-profile: custom
+          remove-android: 'true'
+          remove-dotnet: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-cached-tools: 'true'
+          remove-swift: 'true'
+          remove-julia: 'true'
+          remove-rust: 'true'
+          remove-miniconda: 'true'
+          swapfile-size: 0
+
       - name: Sanity check repo contents
         run: ls -la
 
-      - name: Create and resolve Go cache volumes
-        id: go-cache
-        run: |
-          docker volume create llm-d-gomodcache
-          docker volume create llm-d-gobuildcache
-          echo "mod=$(docker volume inspect llm-d-gomodcache -f '{{.Mountpoint}}')" >> $GITHUB_OUTPUT
-          echo "build=$(docker volume inspect llm-d-gobuildcache -f '{{.Mountpoint}}')" >> $GITHUB_OUTPUT
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false # only needed for `go list` in Makefile; module cache managed by the explicit cache step below
+
+      - name: Create Go cache dirs
+        run: mkdir -p "$GO_MOD_CACHE_VOL" "$GO_BUILD_CACHE_VOL"
 
       - name: Cache Go modules and build cache
         uses: actions/cache@v5
         with:
           path: |
-            ${{ steps.go-cache.outputs.mod }}
-            ${{ steps.go-cache.outputs.build }}
-          key: go-cache-${{ hashFiles('go.sum') }}
+            ${{ env.GO_MOD_CACHE_VOL }}
+            ${{ env.GO_BUILD_CACHE_VOL }}
+          key: go-cache-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
-            go-cache-
-
-      - name: Run make lint
-        run: make lint
-
-      - name: Run make build
-        shell: bash
-        run: make build
+            go-cache-${{ runner.os }}-
 
       # Restore the baseline saved from the last main push so the compare step
       # can diff against it. Missing cache (first PR ever) is not an error;
@@ -80,6 +121,10 @@ jobs:
       - name: Run unit tests
         shell: bash
         run: make test-unit
+
+      - name: Run hermetic integration tests
+        shell: bash
+        run: make test-integration-hermetic
 
       - name: Compare coverage against main baseline
         if: github.event_name == 'pull_request'
@@ -168,6 +213,10 @@ jobs:
           path: coverage/*.out
           retention-days: 400
           overwrite: true
+
+      - name: Clean Docker system
+        shell: bash
+        run: docker system prune -af
 
       - name: Run make test-e2e
         shell: bash
