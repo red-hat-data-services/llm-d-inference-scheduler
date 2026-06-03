@@ -43,11 +43,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/env"
+	"github.com/llm-d/llm-d-router/apix/v1alpha2"
+	"github.com/llm-d/llm-d-router/pkg/epp/util/env"
 )
 
 const (
@@ -257,7 +257,7 @@ func checkPodStatus(testConfig *TestConfig, pod *corev1.Pod, conditions []corev1
 	for _, want := range conditions {
 		for _, c := range fetchedPod.Status.Conditions {
 			if c.Type == want.Type && c.Status == want.Status {
-				found += 1
+				found++
 			}
 		}
 	}
@@ -300,7 +300,7 @@ func checkDeploymentStatus(ctx context.Context, cli client.Client, deploy *appsv
 	for _, want := range conditions {
 		for _, c := range fetchedDeploy.Status.Conditions {
 			if c.Type == want.Type && c.Status == want.Status {
-				found += 1
+				found++
 			}
 		}
 	}
@@ -336,7 +336,7 @@ func checkCrdStatus(
 	for _, want := range conditions {
 		for _, c := range fetchedCrd.Status.Conditions {
 			if c.Type == want.Type && c.Status == want.Status {
-				found += 1
+				found++
 			}
 		}
 	}

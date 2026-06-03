@@ -29,10 +29,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
+	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -44,15 +45,15 @@ const (
 
 // Helper functions
 
-func createTestSchedulingResult(metadata *fwkdl.EndpointMetadata) *schedulingtypes.SchedulingResult {
+func createTestSchedulingResult(metadata *fwkdl.EndpointMetadata) *fwksched.SchedulingResult {
 
 	mockPod := createTestEndpoint(metadata.NamespacedName.Name, kvUsage, runningRequests, waitingQueue)
 
-	return &schedulingtypes.SchedulingResult{
+	return &fwksched.SchedulingResult{
 		PrimaryProfileName: "default",
-		ProfileResults: map[string]*schedulingtypes.ProfileRunResult{
+		ProfileResults: map[string]*fwksched.ProfileRunResult{
 			"default": {
-				TargetEndpoints: []schedulingtypes.Endpoint{mockPod},
+				TargetEndpoints: []fwksched.Endpoint{mockPod},
 			},
 		},
 	}
@@ -89,8 +90,8 @@ func TestNewPredictedLatencyContext(t *testing.T) {
 }
 
 func TestNewPredictedLatencyContext_NilBody(t *testing.T) {
-	request := &schedulingtypes.InferenceRequest{
-		Headers: map[string]string{reqcommon.RequestIdHeaderKey: "test-nil-body"},
+	request := &fwksched.InferenceRequest{
+		Headers: map[string]string{reqcommon.RequestIDHeaderKey: "test-nil-body"},
 		Body:    nil,
 	}
 	ctx := newPredictedLatencyContext(request)
@@ -105,6 +106,17 @@ func TestNewPredictedLatencyContext_ChatCompletionsPrompt(t *testing.T) {
 
 	assert.NotNil(t, ctx)
 	assert.Equal(t, "You are a helpful assistant. Tell me a joke. ", ctx.promptText)
+}
+
+func TestNewPredictedLatencyContext_GenerateUsesTokenIDCount(t *testing.T) {
+	request := createTestInferenceRequestWithBody("test-generate", 1.0, 0.05, &fwkrh.InferenceRequestBody{
+		Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{1, 2, 3, 4, 5}},
+	})
+	ctx := newPredictedLatencyContext(request)
+
+	assert.NotNil(t, ctx)
+	assert.Empty(t, ctx.promptText)
+	assert.Equal(t, 5, ctx.inputTokenCount)
 }
 
 func TestPredictedLatency_SetAndGetSLOContext(t *testing.T) {
@@ -167,8 +179,8 @@ func TestPredictedLatency_PreRequest_EmptySchedulingResult(t *testing.T) {
 	ctx := context.Background()
 	request := createTestInferenceRequest("test", 100, 50)
 
-	schedulingResult := &schedulingtypes.SchedulingResult{
-		ProfileResults: map[string]*schedulingtypes.ProfileRunResult{},
+	schedulingResult := &fwksched.SchedulingResult{
+		ProfileResults: map[string]*fwksched.ProfileRunResult{},
 	}
 
 	// Call PreRequest with empty scheduling result
@@ -381,7 +393,7 @@ func TestPredictedLatency_StreamingMode_ResponseBody_FirstToken(t *testing.T) {
 
 	// Initialize the queue and add the request
 	queue := newRequestPriorityQueue()
-	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIDHeaderKey], 50.0)
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
 
 	beforeTime := time.Now()
@@ -468,7 +480,7 @@ func TestPredictedLatency_StreamingMode_ResponseBody_SubsequentTokens(t *testing
 
 	// Initialize the queue and add the request
 	queue := newRequestPriorityQueue()
-	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIDHeaderKey], 50.0)
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
 
 	router.ResponseBody(ctx, request, response, endpoint.GetMetadata())
@@ -534,7 +546,7 @@ func TestPredictedLatency_StreamingMode_ResponseBody_FinalToken_Success(t *testi
 	// Create queue and add request
 	queue := newRequestPriorityQueue()
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
-	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIDHeaderKey], 50.0)
 
 	predictedLatencyCtx := newPredictedLatencyContext(request)
 	predictedLatencyCtx.ttft = 80
@@ -624,7 +636,7 @@ func TestPredictedLatency_StreamingMode_ResponseBody_FinalToken_WithMetrics(t *t
 	// Create queue
 	queue := newRequestPriorityQueue()
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
-	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIDHeaderKey], 50.0)
 
 	predictedLatencyCtx := newPredictedLatencyContext(request)
 	predictedLatencyCtx.ttft = 80
@@ -657,7 +669,7 @@ func TestPredictedLatency_StreamingMode_ResponseBody_FinalToken_NoSLOs(t *testin
 	// Create queue
 	queue := newRequestPriorityQueue()
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
-	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 0)
+	queue.Add(request.Headers[reqcommon.RequestIDHeaderKey], 0)
 
 	predictedLatencyCtx := newPredictedLatencyContext(request)
 	predictedLatencyCtx.ttft = 80
@@ -696,7 +708,7 @@ func TestPredictedLatency_StreamingMode_ResponseBody_FinalToken(t *testing.T) {
 
 	// Initialize the queue and add the request
 	queue := newRequestPriorityQueue()
-	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIDHeaderKey], 50.0)
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
 
 	router.ResponseBody(ctx, request, response, endpoint.GetMetadata())
@@ -729,7 +741,7 @@ func TestPredictedLatency_StreamingMode_ResponseBody_SingleChunk(t *testing.T) {
 
 	// Initialize the queue and add the request
 	queue := newRequestPriorityQueue()
-	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIDHeaderKey], 50.0)
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
 
 	router.ResponseBody(ctx, request, response, endpoint.GetMetadata())
@@ -762,7 +774,7 @@ func TestPredictedLatency_NonStreamingMode_ResponseBody_FinalToken(t *testing.T)
 
 	// Initialize the queue and add the request
 	queue := newRequestPriorityQueue()
-	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIDHeaderKey], 50.0)
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
 
 	router.ResponseBody(ctx, request, response, endpoint.GetMetadata())
@@ -811,8 +823,8 @@ func TestDecrementEndpointCounter_FloorAtZero(t *testing.T) {
 
 // TestPredictedLatency_ResponseBody_NoOrphanDecrement_WhenPreRequestSkipped
 // simulates the race that drove prefill counters negative in production: the
-// director's PrepareData window timed out, PreRequest saw no SLO context and
-// skipped the counter increment, but the PrepareData goroutine later published
+// director's Produce window timed out, PreRequest saw no SLO context and
+// skipped the counter increment, but the Produce goroutine later published
 // the context anyway. ResponseBody must refuse to decrement counters that
 // PreRequest never bumped up — otherwise prefillTokensInFlight drifts below
 // zero and the prediction server rejects every subsequent request with 422.
@@ -828,9 +840,9 @@ func TestPredictedLatency_ResponseBody_NoOrphanDecrement_WhenPreRequestSkipped(t
 	response := &requestcontrol.Response{EndOfStream: true}
 	schedulingResult := createTestSchedulingResult(endpoint.GetMetadata())
 
-	// Build an SLO context the way PrepareData would have, but skip the
+	// Build an SLO context the way Produce would have, but skip the
 	// PreRequest step that would have incremented prefillTokensAtDispatch.
-	// This mirrors the production bug: PrepareData raced past the director's
+	// This mirrors the production bug: Produce raced past the director's
 	// timeout and published a context that PreRequest never saw.
 	predictedLatencyCtx := newPredictedLatencyContext(request)
 	predictedLatencyCtx.targetMetadata = endpoint.GetMetadata()
@@ -842,7 +854,7 @@ func TestPredictedLatency_ResponseBody_NoOrphanDecrement_WhenPreRequestSkipped(t
 	router.setPredictedLatencyContextForRequest(request, predictedLatencyCtx)
 
 	queue := newRequestPriorityQueue()
-	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIDHeaderKey], 50.0)
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
 
 	decodePodKey := endpoint.GetMetadata().NamespacedName.String()
@@ -1004,7 +1016,7 @@ func TestPredictedLatency_MultipleRequests_SamePod(t *testing.T) {
 	schedulingResult := createTestSchedulingResult(endpoint.GetMetadata())
 
 	// Create and set SLO contexts
-	for _, req := range []*schedulingtypes.InferenceRequest{request1, request2, request3} {
+	for _, req := range []*fwksched.InferenceRequest{request1, request2, request3} {
 		predictedLatencyCtx := newPredictedLatencyContext(req)
 		predictedLatencyCtx.avgTPOTSLO = 50
 		router.setPredictedLatencyContextForRequest(req, predictedLatencyCtx)

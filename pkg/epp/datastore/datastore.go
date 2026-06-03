@@ -33,12 +33,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
-	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	podutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pod"
+	"github.com/llm-d/llm-d-router/apix/v1alpha2"
+	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/epp/datalayer"
+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	podutil "github.com/llm-d/llm-d-router/pkg/epp/util/pod"
 )
 
 var (
@@ -50,7 +50,12 @@ const (
 	// activePortsAnnotation is used to specify which ports on a pod should be considered
 	// as active for inference traffic. The value should be a comma-separated list of port numbers.
 	// Example: "8000,8001,8002"
-	activePortsAnnotation = "inference.networking.k8s.io/active-ports"
+	activePortsAnnotation = "llm-d.ai/active-ports"
+
+	// legacyGAIEActivePortsAnnotation is the legacy GAIE active ports annotation key, kept for backward compatibility.
+	//
+	// Deprecated: use activePortsAnnotation instead; this may be removed in a future release.
+	legacyGAIEActivePortsAnnotation = "inference.networking.k8s.io/active-ports"
 )
 
 // The datastore is a local cache of relevant data for the given InferencePool (currently all pulled from k8s-api)
@@ -63,6 +68,7 @@ type Datastore interface {
 	PoolGet() (*datalayer.EndpointPool, error)
 	PoolHasSynced() bool
 	PoolLabelsMatch(podLabels map[string]string) bool
+	WithEndpointPool(pool *datalayer.EndpointPool) Datastore
 
 	// InferenceObjective operations
 	ObjectiveSet(infObjective *v1alpha2.InferenceObjective)
@@ -81,6 +87,11 @@ type Datastore interface {
 	PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) bool
 	PodDelete(podName string)
 
+	// EndpointUpsert adds or updates an endpoint from a non-Kubernetes discovery source.
+	EndpointUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata)
+	// EndpointDelete removes the endpoint with the given namespaced name.
+	EndpointDelete(id types.NamespacedName)
+
 	// Clears the store state, happens when the pool gets deleted.
 	Clear()
 }
@@ -90,7 +101,7 @@ var _ Datastore = &datastore{}
 
 // NewDatastore creates a new data store.
 // TODO: modelServerMetricsPort is being deprecated
-func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory, modelServerMetricsPort int32) *datastore {
+func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory, modelServerMetricsPort int32) Datastore {
 	// Initialize with defaults
 	return &datastore{
 		parentCtx:              parentCtx,
@@ -122,7 +133,7 @@ type datastore struct {
 	epf                    datalayer.EndpointFactory
 }
 
-func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) *datastore {
+func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) Datastore {
 	ds.pool = pool
 	return ds
 }
@@ -315,6 +326,7 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
 				Port:           strconv.Itoa(port),
 				MetricsHost:    net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(metricsPort)),
 				Labels:         labels,
+				RankIndex:      idx,
 			})
 	}
 
@@ -328,23 +340,9 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
 	existingEpSet := sets.Set[types.NamespacedName]{}
 	for _, endpointMetadata := range pods {
 		existingEpSet.Insert(endpointMetadata.NamespacedName)
-		var ep fwkdl.Endpoint
-		existing, ok := ds.pods.Load(endpointMetadata.NamespacedName)
-		if !ok {
-			ep = ds.epf.NewEndpoint(ds.parentCtx, endpointMetadata, ds)
-			if ep == nil {
-				// NewEndpoint returns nil when a collector is already running for this
-				// endpoint (duplicate reconcile race). The existing entry in ds.pods
-				// is still valid; skip re-registering it.
-				continue
-			}
-			ds.pods.Store(endpointMetadata.NamespacedName, ep)
+		if ds.upsertEndpoint(endpointMetadata) {
 			result = false
-		} else {
-			ep = existing.(fwkdl.Endpoint)
 		}
-		// Update endpoint properties if anything changed.
-		ep.UpdateMetadata(endpointMetadata)
 	}
 
 	// remove endpoints that are no longer active in the pool
@@ -372,6 +370,37 @@ func (ds *datastore) PodDelete(podName string) {
 		}
 		return true
 	})
+}
+
+func (ds *datastore) EndpointUpsert(_ context.Context, meta *fwkdl.EndpointMetadata) {
+	ds.upsertEndpoint(meta)
+}
+
+func (ds *datastore) EndpointDelete(id types.NamespacedName) {
+	if v, ok := ds.pods.LoadAndDelete(id); ok {
+		ds.epf.ReleaseEndpoint(v.(fwkdl.Endpoint))
+	}
+}
+
+// upsertEndpoint stores or updates a single endpoint in the pods map.
+// Returns true if the endpoint was newly created, false if it already existed
+// or if NewEndpoint returned nil (duplicate-start race).
+// Shared by EndpointUpsert and podUpdateOrAddIfNotExist.
+func (ds *datastore) upsertEndpoint(meta *fwkdl.EndpointMetadata) bool {
+	existing, ok := ds.pods.Load(meta.NamespacedName)
+	if !ok {
+		ep := ds.epf.NewEndpoint(ds.parentCtx, meta)
+		if ep == nil {
+			// NewEndpoint returns nil when a collector is already running for this
+			// endpoint (duplicate reconcile race). The existing entry in ds.pods
+			// is still valid; skip re-registering it.
+			return false
+		}
+		ds.pods.Store(meta.NamespacedName, ep)
+		return true
+	}
+	existing.(fwkdl.Endpoint).UpdateMetadata(meta)
+	return false
 }
 
 func (ds *datastore) podResyncAll(ctx context.Context, reader client.Reader) error {
@@ -424,7 +453,10 @@ func extractActivePorts(pod *corev1.Pod, targetPorts []int) sets.Set[int] {
 	annotations := pod.GetAnnotations()
 	portsAnnotation, ok := annotations[activePortsAnnotation]
 	if !ok {
-		return allPorts
+		portsAnnotation, ok = annotations[legacyGAIEActivePortsAnnotation]
+		if !ok {
+			return allPorts
+		}
 	}
 
 	activePorts := sets.New[int]()

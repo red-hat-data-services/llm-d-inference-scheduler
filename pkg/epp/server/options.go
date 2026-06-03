@@ -19,12 +19,16 @@ package server
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/spf13/pflag"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
 )
 
 const (
@@ -32,13 +36,33 @@ const (
 	DefaultPoolNamespace = "default" // default when pool namespace is empty (CLI flag default is empty)
 )
 
+// deprecatedMetricFlags lists metric flags that are superseded by engineConfigs
+// in EndpointPickerConfig. They are rejected if explicitly set and suppressed from logs.
+var deprecatedMetricFlags = map[string]struct{}{
+	"total-queued-requests-metric":     {},
+	"total-running-requests-metric":    {},
+	"kv-cache-usage-percentage-metric": {},
+	"lora-info-metric":                 {},
+	"cache-info-metric":                {},
+}
+
+// IsDeprecatedMetricFlag reports whether the given flag name is a deprecated metric flag.
+func IsDeprecatedMetricFlag(name string) bool {
+	_, ok := deprecatedMetricFlags[name]
+	return ok
+}
+
 // Options contains configuration values necessary to create and run the EPP.
 type Options struct {
 	//
 	// ext_proc configuration.
 	//
-	GRPCPort             int  // gRPC port used for communicating with Envoy proxy. (TODO: uint16?)
-	EnableLeaderElection bool // Enables leader election for high availability
+	GRPCPort              int    // gRPC port used for communicating with Envoy proxy. (TODO: uint16?)
+	EnableLeaderElection  bool   // Enables leader election for high availability
+	GRPCMaxRecvMsgSize    int    // Maximum size of a gRPC message to receive (parsed bytes).
+	GRPCMaxSendMsgSize    int    // Maximum size of a gRPC message to send (parsed bytes).
+	GRPCMaxRecvMsgSizeStr string // Raw string value from CLI flag for receive limit.
+	GRPCMaxSendMsgSizeStr string // Raw string value from CLI flag for send limit.
 	//
 	// InferencePool.
 	//
@@ -50,7 +74,7 @@ type Options struct {
 	//
 	EndpointSelector            string // Selector to filter model server pods on, only 'key=value' pairs are supported. (TODO: k8s.Selector, pflag.StringSlice?)
 	EndpointTargetPorts         []int  // Target ports of model server pods.
-	DisableEndpointSubsetFilter bool   // Disables respecting x-gateway-destination-endpoint-subset in EPP.
+	DisableEndpointSubsetFilter bool   // Disables respecting destination endpoint subset metadata in EPP.
 	//
 	// MSP metrics scraping.
 	//
@@ -93,7 +117,7 @@ type Options struct {
 func NewOptions() *Options {
 	return &Options{ // "zero" values are no explicitly set
 		GRPCPort:                         DefaultGrpcPort,
-		PoolGroup:                        "inference.networking.k8s.io",
+		PoolGroup:                        routing.InferencePoolAPIGroup,
 		EndpointTargetPorts:              []int{},
 		DisableEndpointSubsetFilter:      false,
 		ModelServerMetricsScheme:         "http",
@@ -126,6 +150,8 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.IntVar(&opts.GRPCPort, "grpc-port", opts.GRPCPort, "gRPC port used for communicating with Envoy proxy.")
 	fs.BoolVar(&opts.EnableLeaderElection, "ha-enable-leader-election", opts.EnableLeaderElection,
 		"Enables leader election for high availability. When enabled, readiness probes will only pass on the leader.")
+	fs.StringVar(&opts.GRPCMaxRecvMsgSizeStr, "grpc-max-recv-msg-size", opts.GRPCMaxRecvMsgSizeStr, "Maximum size of a gRPC message to receive (e.g., 10MiB, 25MB).")
+	fs.StringVar(&opts.GRPCMaxSendMsgSizeStr, "grpc-max-send-msg-size", opts.GRPCMaxSendMsgSizeStr, "Maximum size of a gRPC message to send (e.g., 10MiB, 25MB).")
 	fs.StringVar(&opts.PoolGroup, "pool-group", opts.PoolGroup,
 		"Kubernetes resource group of the InferencePool this Endpoint Picker is associated with. Only `inference.networking.k8s.io/v1` is currently supported.")
 	fs.StringVar(&opts.PoolNamespace, "pool-namespace", opts.PoolNamespace,
@@ -137,7 +163,7 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.IntSliceVar(&opts.EndpointTargetPorts, "endpoint-target-ports", opts.EndpointTargetPorts, "Target ports of model server pods. "+
 		"Format: a comma-separated list of numbers without whitespace (e.g., '3000,3001,3002').")
 	fs.BoolVar(&opts.DisableEndpointSubsetFilter, "disable-endpoint-subset-filter", opts.DisableEndpointSubsetFilter,
-		"Disables respecting the x-gateway-destination-endpoint-subset metadata for dispatching requests in EPP.")
+		"Disables respecting the destination endpoint subset metadata for dispatching requests in EPP.")
 	fs.StringVar(&opts.ModelServerMetricsScheme, "model-server-metrics-scheme", opts.ModelServerMetricsScheme,
 		"Protocol scheme used in scraping metrics from endpoints.")
 	_ = fs.MarkDeprecated("model-server-metrics-scheme", "This flag is deprecated. Configure via EndpointPickerConfig data layer plugin parameters instead.")
@@ -198,6 +224,43 @@ func (opts *Options) Complete() error {
 
 	opts.EndpointTargetPorts = removeDuplicatePorts(opts.EndpointTargetPorts)
 
+	if opts.GRPCMaxRecvMsgSizeStr != "" {
+		s := sanitizeSizeString(opts.GRPCMaxRecvMsgSizeStr)
+		q, err := resource.ParseQuantity(s)
+		if err != nil {
+			return fmt.Errorf("invalid grpc-max-recv-msg-size: %w", err)
+		}
+		val, ok := q.AsInt64()
+		if !ok {
+			return fmt.Errorf("grpc-max-recv-msg-size overflows maximum supported size: %s", s)
+		}
+		if val < 0 {
+			return fmt.Errorf("grpc-max-recv-msg-size must be non-negative, got %d", val)
+		}
+		if val > int64(math.MaxInt) {
+			return fmt.Errorf("grpc-max-recv-msg-size overflows int: %d", val)
+		}
+		opts.GRPCMaxRecvMsgSize = int(val)
+	}
+	if opts.GRPCMaxSendMsgSizeStr != "" {
+		s := sanitizeSizeString(opts.GRPCMaxSendMsgSizeStr)
+		q, err := resource.ParseQuantity(s)
+		if err != nil {
+			return fmt.Errorf("invalid grpc-max-send-msg-size: %w", err)
+		}
+		val, ok := q.AsInt64()
+		if !ok {
+			return fmt.Errorf("grpc-max-send-msg-size overflows maximum supported size: %s", s)
+		}
+		if val < 0 {
+			return fmt.Errorf("grpc-max-send-msg-size must be non-negative, got %d", val)
+		}
+		if val > int64(math.MaxInt) {
+			return fmt.Errorf("grpc-max-send-msg-size overflows int: %d", val)
+		}
+		opts.GRPCMaxSendMsgSize = int(val)
+	}
+
 	// Complete logging options.
 	return opts.LoggingOptions.Complete()
 }
@@ -225,26 +288,30 @@ func (opts *Options) Validate() error {
 			opts.ModelServerMetricsScheme, "model-server-metrics-scheme")
 	}
 
-	// Validate deprecated metric flags are not explicitly set
-	deprecatedMetricFlags := []string{
-		"total-queued-requests-metric",
-		"total-running-requests-metric",
-		"kv-cache-usage-percentage-metric",
-		"lora-info-metric",
-		"cache-info-metric",
+	if opts.GRPCMaxRecvMsgSize < 0 {
+		return fmt.Errorf("grpc-max-recv-msg-size must be non-negative, got %d", opts.GRPCMaxRecvMsgSize)
 	}
-	for _, flagName := range deprecatedMetricFlags {
+	if opts.GRPCMaxSendMsgSize < 0 {
+		return fmt.Errorf("grpc-max-send-msg-size must be non-negative, got %d", opts.GRPCMaxSendMsgSize)
+	}
+
+	// Validate deprecated metric flags are not explicitly set
+	for flagName := range deprecatedMetricFlags {
 		if f := opts.fs.Lookup(flagName); f != nil && f.Changed {
 			return fmt.Errorf("flag %q is deprecated and cannot be used; configure metrics via engineConfigs in EndpointPickerConfig instead", flagName)
 		}
 	}
 
 	// Validate logging options.
-	if err := opts.LoggingOptions.Validate(); err != nil {
-		return err
-	}
+	return opts.LoggingOptions.Validate()
+}
 
-	return nil
+func sanitizeSizeString(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 1 && (s[len(s)-1] == 'B' || s[len(s)-1] == 'b') {
+		return s[:len(s)-1]
+	}
+	return s
 }
 
 func removeDuplicatePorts(ports []int) []int {
