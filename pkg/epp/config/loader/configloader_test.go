@@ -49,6 +49,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/anthropic"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/openai"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/vertexai"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/vllmhttp"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/picker/maxscore"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/profilehandler/single"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
@@ -513,15 +514,19 @@ func TestInstantiateAndConfigure(t *testing.T) {
 			},
 		},
 		{
-			name:       "Success - Config without parser and a default openai parser is injected",
+			name:       "Success - Config without parser and default parsers are injected",
 			configText: successWithNoParserConfigText,
 			wantErr:    false,
 			validate: func(t *testing.T, handle fwkplugin.Handle, rawCfg *configapi.EndpointPickerConfig, cfg *config.Config) {
 				require.NotNil(t, cfg.ParserRegistry, "Parser registry should be loaded")
 				parsers := cfg.ParserRegistry.Parsers()
-				require.Len(t, parsers, 1, "Should have one parser")
-				require.Equal(t, "openai-parser", parsers[0].TypedName().Name, "Should have openai parser name")
-				require.Equal(t, openai.OpenAIParserType, parsers[0].TypedName().Type, "Should contain openai parser type")
+				require.Len(t, parsers, 3, "Should have three default parsers")
+				require.Equal(t, "openai-parser", parsers[0].TypedName().Name)
+				require.Equal(t, openai.OpenAIParserType, parsers[0].TypedName().Type)
+				require.Equal(t, "anthropic-parser", parsers[1].TypedName().Name)
+				require.Equal(t, anthropic.AnthropicParserType, parsers[1].TypedName().Type)
+				require.Equal(t, "vllmhttp-parser", parsers[2].TypedName().Name)
+				require.Equal(t, vllmhttp.VllmHTTPParserType, parsers[2].TypedName().Type)
 			},
 		},
 		{
@@ -922,6 +927,7 @@ func registerTestPlugins(t *testing.T) {
 	fwkplugin.Register(openai.OpenAIParserType, openai.OpenAIParserPluginFactory)
 	fwkplugin.Register(vertexai.VertexAIParserType, vertexai.VertexAIParserPluginFactory)
 	fwkplugin.Register(anthropic.AnthropicParserType, anthropic.AnthropicParserPluginFactory)
+	fwkplugin.Register(vllmhttp.VllmHTTPParserType, vllmhttp.VllmHTTPParserPluginFactory)
 	fwkplugin.Register(usagelimits.StaticUsageLimitPolicyType, usagelimits.StaticPolicyFactory)
 	fwkplugin.Register(prefix.PrefixCacheScorerPluginType, prefix.PrefixCachePluginFactory)
 	fwkplugin.Register(reqdataprodprefix.ApproxPrefixCachePluginType, reqdataprodprefix.ApproxPrefixCacheFactory)

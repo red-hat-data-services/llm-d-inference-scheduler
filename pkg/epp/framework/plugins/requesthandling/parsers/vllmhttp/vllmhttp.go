@@ -29,6 +29,8 @@ import (
 	"fmt"
 	"strings"
 
+	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
+
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
@@ -82,13 +84,9 @@ func (p *VllmHTTPParser) WithName(name string) *VllmHTTPParser {
 }
 
 func (p *VllmHTTPParser) Claims() fwkrh.Claims {
-	openaiClaims := p.openai.Claims()
-	paths := make([]string, 0, 1+len(openaiClaims.Paths))
-	paths = append(paths, generatePathSuffix)
-	paths = append(paths, openaiClaims.Paths...)
 	return fwkrh.Claims{
-		Paths:     paths,
-		Protocols: openaiClaims.Protocols,
+		Paths:     []string{generatePathSuffix},
+		Protocols: []v1.AppProtocol{v1.AppProtocolH2C, v1.AppProtocolHTTP},
 	}
 }
 
@@ -98,7 +96,7 @@ func (p *VllmHTTPParser) ParseRequest(ctx context.Context, body []byte, headers 
 	if strings.HasSuffix(request.GetRequestPath(headers), generatePathSuffix) {
 		return p.parseGenerateRequest(body)
 	}
-	return p.openai.ParseRequest(ctx, body, headers)
+	return nil, fmt.Errorf("unsupported path: %s", request.GetRequestPath(headers))
 }
 
 // ParseResponse delegates to the OpenAI parser. /inference/v1/generate
