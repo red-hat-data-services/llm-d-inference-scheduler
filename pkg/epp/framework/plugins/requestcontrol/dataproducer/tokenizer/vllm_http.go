@@ -152,6 +152,15 @@ func (r *vllmHTTPRenderer) chatTimeout(req *tokenizerTypes.RenderChatRequest) ti
 	return r.timeout
 }
 
+// produceTimeout returns the worst-case configured render timeout (multimodal),
+// surfaced so the data-producer executor extends its budget past the default.
+func (r *vllmHTTPRenderer) produceTimeout() time.Duration {
+	if r.mmTimeout > r.timeout {
+		return r.mmTimeout
+	}
+	return r.timeout
+}
+
 // completionsRenderRequest is the wire body for POST /v1/completions/render.
 type completionsRenderRequest struct {
 	Model  string `json:"model"`

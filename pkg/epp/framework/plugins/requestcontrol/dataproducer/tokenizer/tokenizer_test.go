@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
@@ -51,6 +52,28 @@ func newTestPlugin(tok tokenizer) *Plugin {
 		typedName: plugin.TypedName{Type: PluginType, Name: "test"},
 		backend:   renderBackend{tk: tok},
 	}
+}
+
+func TestProduceTimeout(t *testing.T) {
+	ctx := context.Background()
+
+	// vLLM backend surfaces its configured render timeout (default mmTimeout).
+	vp, err := NewPlugin(ctx, "tok", &tokenizerPluginConfig{ModelName: "m", VLLM: &vllmConfig{}})
+	require.NoError(t, err)
+	assert.Equal(t, defaultHTTPRenderMMTimeout, vp.ProduceTimeout())
+
+	// The override value is the plugin's own configurable timeout.
+	vp2, err := NewPlugin(ctx, "tok", &tokenizerPluginConfig{ModelName: "m", VLLM: &vllmConfig{MMTimeout: "45s"}})
+	require.NoError(t, err)
+	assert.Equal(t, 45*time.Second, vp2.ProduceTimeout())
+
+	// Estimate backend declares none, so the director keeps its default.
+	ep, err := NewPlugin(ctx, "tok", &tokenizerPluginConfig{Estimate: &estimateConfig{}})
+	require.NoError(t, err)
+	assert.Zero(t, ep.ProduceTimeout())
+
+	// A render backend whose tokenizer manages no timeout (e.g. UDS) keeps the default.
+	assert.Zero(t, newTestPlugin(&mockTokenizer{}).ProduceTimeout())
 }
 
 func TestPluginFactory_Validation(t *testing.T) {
