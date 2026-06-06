@@ -83,6 +83,7 @@ func InFlightLoadProducerFactory(name string, decoder *json.Decoder, handle fwkp
 		addEstimatedOutputTokens: cfg.AddEstimatedOutputTokens,
 		dk:                       attrconcurrency.InFlightLoadDataKey.WithNonEmptyProducerName(name),
 		prefixMatchInfoDK:        attrprefix.PrefixCacheMatchInfoDataKey.WithNonEmptyProducerName(cfg.PrefixMatchInfoProducerName),
+		uncachedRequestTokensDk:  attrconcurrency.UncachedRequestTokensDataKey.WithNonEmptyProducerName(name),
 		PluginState:              fwkplugin.NewPluginState(ctx),
 	}, nil
 }
@@ -105,6 +106,7 @@ type InFlightLoadProducer struct {
 	PluginState              *fwkplugin.PluginState
 	dk                       fwkplugin.DataKey
 	prefixMatchInfoDK        fwkplugin.DataKey
+	uncachedRequestTokensDk  fwkplugin.DataKey
 }
 
 // addedTokensEntry tracks a request's contribution to the global token and
@@ -184,16 +186,29 @@ func (p *InFlightLoadProducer) RegisterDependencies(r datalayer.Registrar) error
 	})
 }
 
-// Extract handles endpoint deletion events to prune stateful trackers.
+// Extract handles endpoint lifecycle events to manage dynamic attributes.
 func (p *InFlightLoadProducer) Extract(ctx context.Context, event datalayer.EndpointEvent) error {
-	if event.Type != datalayer.EventDelete || event.Endpoint == nil || event.Endpoint.GetMetadata() == nil {
+	if event.Endpoint == nil || event.Endpoint.GetMetadata() == nil {
 		return nil
 	}
 
 	id := event.Endpoint.GetMetadata().NamespacedName.String()
 
-	p.DeleteEndpoint(id)
-	log.FromContext(ctx).V(logutil.DEFAULT).Info("Cleaned up in-flight load for deleted endpoint", "endpoint", id)
+	switch event.Type {
+	case datalayer.EventDelete:
+		p.DeleteEndpoint(id)
+		log.FromContext(ctx).V(logutil.DEFAULT).Info("Cleaned up in-flight load for deleted endpoint", "endpoint", id)
+	case datalayer.EventAddOrUpdate:
+		event.Endpoint.GetAttributes().Put(p.dk.String(), &datalayer.DynamicAttribute{
+			Get: func() datalayer.Cloneable {
+				return &attrconcurrency.InFlightLoad{
+					Tokens:   p.GetTokens(id),
+					Requests: p.GetRequests(id),
+				}
+			},
+		})
+		log.FromContext(ctx).V(logutil.DEFAULT).Info("Injected dynamic attribute into endpoint", "key", p.dk.String(), "endpoint", id)
+	}
 	return nil
 }
 
@@ -207,20 +222,12 @@ func (p *InFlightLoadProducer) Produce(_ context.Context, request *fwksched.Infe
 		if e == nil || e.GetMetadata() == nil {
 			continue
 		}
-		endpointID := e.GetMetadata().NamespacedName.String()
-
-		load := &attrconcurrency.InFlightLoad{
-			Tokens:   p.tokenTracker.get(endpointID),
-			Requests: p.requestTracker.get(endpointID),
-		}
 		if request != nil {
-			// Project this request's additional work onto the endpoint: uncached
-			// input tokens (per its prefix-cache state) plus estimated output
-			// when the producer is configured to include it. Per-cycle, not
-			// persisted in the tracker — that happens only on PreRequest.
-			load.UncachedRequestTokens = p.estimateRequestTokens(e, inputTokens)
+			tokens := p.estimateRequestTokens(e, inputTokens)
+			e.Put(p.uncachedRequestTokensDk.String(), &attrconcurrency.UncachedRequestTokens{
+				Tokens: tokens,
+			})
 		}
-		e.Put(p.dk.String(), load)
 	}
 	return nil
 }
@@ -446,7 +453,8 @@ func nonNeg(v int64) int64 {
 
 func (p *InFlightLoadProducer) Produces() map[fwkplugin.DataKey]any {
 	return map[fwkplugin.DataKey]any{
-		p.dk: attrconcurrency.InFlightLoad{},
+		p.dk:                      attrconcurrency.InFlightLoad{},
+		p.uncachedRequestTokensDk: attrconcurrency.UncachedRequestTokens{},
 	}
 }
 
@@ -473,6 +481,14 @@ func (p *InFlightLoadProducer) Consumes() fwkplugin.DataDependencies {
 func (p *InFlightLoadProducer) DeleteEndpoint(endpointID string) {
 	p.requestTracker.delete(endpointID)
 	p.tokenTracker.delete(endpointID)
+}
+
+func (p *InFlightLoadProducer) GetTokens(eid string) int64 {
+	return p.tokenTracker.get(eid)
+}
+
+func (p *InFlightLoadProducer) GetRequests(eid string) int64 {
+	return p.requestTracker.get(eid)
 }
 
 // concurrencyTracker manages thread-safe counters for inflight requests.
