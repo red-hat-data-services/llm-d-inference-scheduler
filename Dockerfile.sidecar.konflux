@@ -29,7 +29,7 @@ ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
 RUN go build -a -tags strictfipsruntime -o bin/pd-sidecar \
-       -ldflags="-X github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version.CommitSHA=${COMMIT_SHA} -X github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version.BuildRef=${BUILD_REF}" \
+       -ldflags="-X github.com/llm-d/llm-d-router/pkg/sidecar/version.CommitSHA=${COMMIT_SHA} -X github.com/llm-d/llm-d-router/pkg/sidecar/version.BuildRef=${BUILD_REF}" \
        cmd/cmd.go
 
 FROM registry.access.redhat.com/ubi9/ubi-micro:9.7
