@@ -12,9 +12,6 @@ COPY go.mod go.mod
 COPY go.sum go.sum
 # cache deps before building and copying source so that we don't need to re-download as much
 # and so that source changes don't invalidate our downloaded layer
-# GOTOOLCHAIN=local prevents Go from auto-downloading a newer toolchain when go.mod
-# specifies a version newer than the local toolchain (e.g., go 1.25.10 vs go-toolset 1.25.7)
-ENV GOTOOLCHAIN=local
 RUN go mod download
 
 # Copy the go source
