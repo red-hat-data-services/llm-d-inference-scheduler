@@ -28,4 +28,7 @@ const (
 
 	// ECExampleConnector enables the Encoder disaggregation protocol (E/PD, E/P/D)
 	ECExampleConnector = "ec-example"
+
+	// ECConnectorNIXL enables the Encoder disaggregation NIXL protocol (E/PD, E/P/D)
+	ECConnectorNIXL = "ec-nixl"
 )
