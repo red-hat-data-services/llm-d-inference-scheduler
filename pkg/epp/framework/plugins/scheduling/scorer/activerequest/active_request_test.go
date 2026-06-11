@@ -12,26 +12,48 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	attrconcurrency "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/inflightload"
-	"github.com/llm-d/llm-d-router/test/utils"
-	igwtestutils "github.com/llm-d/llm-d-router/test/utils/igw"
+	testutils "github.com/llm-d/llm-d-router/test/utils"
 )
 
 // Test helper functions
 
 func float64Ptr(v float64) *float64 { return &v }
 
-func newTestEndpoint(name string, queueSize int) scheduling.Endpoint {
-	return scheduling.NewEndpoint(
-		&datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: name, Namespace: "default"}},
-		&datalayer.Metrics{
+type stubEndpoint struct {
+	metadata *datalayer.EndpointMetadata
+	metrics  *datalayer.Metrics
+	attr     datalayer.AttributeMap
+}
+
+func newStubEndpoint(name string, queueSize int) *stubEndpoint {
+	return &stubEndpoint{
+		metadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: name, Namespace: "default"}},
+		metrics: &datalayer.Metrics{
 			WaitingQueueSize: queueSize,
 		},
-		nil,
-	)
+		attr: datalayer.NewAttributes(),
+	}
+}
+
+func (f *stubEndpoint) GetMetadata() *datalayer.EndpointMetadata   { return f.metadata }
+func (f *stubEndpoint) UpdateMetadata(*datalayer.EndpointMetadata) {}
+func (f *stubEndpoint) GetMetrics() *datalayer.Metrics             { return f.metrics }
+func (f *stubEndpoint) UpdateMetrics(*datalayer.Metrics)           {}
+func (f *stubEndpoint) GetAttributes() datalayer.AttributeMap      { return f.attr }
+func (f *stubEndpoint) String() string                             { return f.metadata.NamespacedName.String() }
+func (f *stubEndpoint) Put(key string, val datalayer.Cloneable)    { f.attr.Put(key, val) }
+func (f *stubEndpoint) Get(key string) (datalayer.Cloneable, bool) {
+	return f.attr.Get(key)
+}
+func (f *stubEndpoint) Keys() []string                { return f.attr.Keys() }
+func (f *stubEndpoint) Clone() datalayer.AttributeMap { return f.attr.Clone() }
+
+func newTestEndpoint(name string, queueSize int) scheduling.Endpoint {
+	return newStubEndpoint(name, queueSize)
 }
 
 func newTestEndpointWithLoad(name string, requests int64) scheduling.Endpoint {
-	ep := newTestEndpoint(name, 0)
+	ep := newStubEndpoint(name, 0)
 	ep.Put(attrconcurrency.InFlightLoadDataKey.String(), &attrconcurrency.InFlightLoad{Requests: requests})
 	return ep
 }
@@ -79,7 +101,7 @@ func TestActiveRequestScorer_Score(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := utils.NewTestContext(t)
+			ctx := testutils.NewTestContext(t)
 			scorer := NewActiveRequest(ctx, nil)
 			endpoints := test.endpoints()
 
@@ -95,9 +117,9 @@ func TestActiveRequestScorer_Score(t *testing.T) {
 }
 
 func TestActiveRequestScorer_UsesInFlightLoadProducerLifecycle(t *testing.T) {
-	ctx := utils.NewTestContext(t)
+	ctx := testutils.NewTestContext(t)
 
-	producerPlugin, err := inflightload.InFlightLoadProducerFactory(inflightload.InFlightLoadProducerType, nil, igwtestutils.NewTestHandle(ctx))
+	producerPlugin, err := inflightload.InFlightLoadProducerFactory(inflightload.InFlightLoadProducerType, nil, testutils.NewTestHandle(ctx))
 	require.NoError(t, err)
 	producer := producerPlugin.(*inflightload.InFlightLoadProducer)
 	scorer := NewActiveRequest(ctx, nil)
@@ -105,6 +127,12 @@ func TestActiveRequestScorer_UsesInFlightLoadProducerLifecycle(t *testing.T) {
 	podA := newTestEndpoint("pod-a", 0)
 	podB := newTestEndpoint("pod-b", 0)
 	endpoints := []scheduling.Endpoint{podA, podB}
+
+	// Simulate Extract to inject the dynamic attribute
+	err = producer.Extract(ctx, datalayer.EndpointEvent{Type: datalayer.EventAddOrUpdate, Endpoint: podA.(datalayer.Endpoint)})
+	require.NoError(t, err)
+	err = producer.Extract(ctx, datalayer.EndpointEvent{Type: datalayer.EventAddOrUpdate, Endpoint: podB.(datalayer.Endpoint)})
+	require.NoError(t, err)
 
 	req := &scheduling.InferenceRequest{RequestID: "req-1", RequestSizeBytes: 4}
 	result := &scheduling.SchedulingResult{
@@ -135,7 +163,7 @@ func TestActiveRequestScorer_UsesInFlightLoadProducerLifecycle(t *testing.T) {
 }
 
 func TestNewActiveRequestScorer_DeprecatedRequestTimeoutIgnored(t *testing.T) {
-	ctx := utils.NewTestContext(t)
+	ctx := testutils.NewTestContext(t)
 
 	params := &Parameters{RequestTimeout: "invalid"}
 	scorer := NewActiveRequest(ctx, params)
@@ -144,7 +172,7 @@ func TestNewActiveRequestScorer_DeprecatedRequestTimeoutIgnored(t *testing.T) {
 }
 
 func TestActiveRequestScorer_Consumes(t *testing.T) {
-	ctx := utils.NewTestContext(t)
+	ctx := testutils.NewTestContext(t)
 
 	scorer := NewActiveRequest(ctx, nil)
 	consumes := scorer.Consumes()
@@ -154,7 +182,7 @@ func TestActiveRequestScorer_Consumes(t *testing.T) {
 }
 
 func TestActiveRequestScorer_TypedName(t *testing.T) {
-	ctx := utils.NewTestContext(t)
+	ctx := testutils.NewTestContext(t)
 
 	scorer := NewActiveRequest(ctx, nil)
 
@@ -162,7 +190,7 @@ func TestActiveRequestScorer_TypedName(t *testing.T) {
 }
 
 func TestActiveRequestScorer_WithName(t *testing.T) {
-	ctx := utils.NewTestContext(t)
+	ctx := testutils.NewTestContext(t)
 
 	scorer := NewActiveRequest(ctx, nil)
 	testName := "test-scorer"
@@ -173,7 +201,7 @@ func TestActiveRequestScorer_WithName(t *testing.T) {
 }
 
 func TestActiveRequest_IdleThresholdAndMaxBusyScore(t *testing.T) {
-	ctx := utils.NewTestContext(t)
+	ctx := testutils.NewTestContext(t)
 
 	t.Run("binary mode: idleThreshold=0, maxBusyScore=0", func(t *testing.T) {
 		params := &Parameters{
@@ -219,7 +247,7 @@ func TestActiveRequest_IdleThresholdAndMaxBusyScore(t *testing.T) {
 // regression where an unset MaxBusyScore (Go zero-value 0.0) silently put the
 // scorer into binary mode, returning 0.0 for every non-idle pod.
 func TestActiveRequest_DefaultParamsProduceContinuousScores(t *testing.T) {
-	ctx := utils.NewTestContext(t)
+	ctx := testutils.NewTestContext(t)
 	scorer := NewActiveRequest(ctx, &Parameters{})
 
 	podLight := newTestEndpointWithLoad("pod-light", 3)

@@ -42,8 +42,9 @@ const (
 	InferenceObjectiveSubsystem = inferenceObjectiveComponent
 	// InferenceExtensionSubsystem is the legacy subsystem for inference extension metrics.
 	InferenceExtensionSubsystem = inferenceExtension
-	// LLMDRouterEndpointPickerSubsystem is the subsystem for llm-d router endpoint picker metrics.
-	LLMDRouterEndpointPickerSubsystem = "llm_d_router_endpoint_picker"
+
+	// SchedulerSubsystem is the legacy metric prefix for scheduler.
+	SchedulerSubsystem = "llm_d_inference_scheduler"
 )
 
 var (
@@ -383,6 +384,34 @@ var inferenceModelRewriteDecisionsTotal = prometheus.NewCounterVec(
 	[]string{"model_rewrite_name", "model_name", "target_model"},
 )
 
+// --- Data-layer Metrics ---
+
+var (
+	// DataLayerPollErrorsTotal records data-source poll errors per source type.
+	//
+	// Deprecated: Use LlmdDataLayerPollErrorsTotal instead.
+	DataLayerPollErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: SchedulerSubsystem,
+			Name:      "datalayer_poll_errors_total",
+			Help:      metricsutil.HelpMsgWithStability("[Deprecated: Use llm_d_router_epp_datalayer_poll_errors_total] Data-source poll errors per source type.", compbasemetrics.ALPHA),
+		},
+		[]string{"source_type"},
+	)
+
+	// DataLayerExtractErrorsTotal records extract errors per source/extractor type.
+	//
+	// Deprecated: Use LlmdDataLayerExtractErrorsTotal instead.
+	DataLayerExtractErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: SchedulerSubsystem,
+			Name:      "datalayer_extract_errors_total",
+			Help:      metricsutil.HelpMsgWithStability("[Deprecated: Use llm_d_router_epp_datalayer_extract_errors_total] Extract errors per source/extractor type.", compbasemetrics.ALPHA),
+		},
+		[]string{"source_type", "extractor_type"},
+	)
+)
+
 var registerMetrics sync.Once
 
 // Register all metrics.
@@ -409,6 +438,8 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(llmdRunningRequests)
 		metrics.Registry.MustRegister(normalizedTimePerOutputToken)
 		metrics.Registry.MustRegister(llmdNormalizedTimePerOutputToken)
+		metrics.Registry.MustRegister(llmdRequestTTFT)
+		metrics.Registry.MustRegister(llmdRequestTPOT)
 		metrics.Registry.MustRegister(inferencePoolAvgKVCache)
 		metrics.Registry.MustRegister(llmdInferencePoolAvgKVCache)
 		metrics.Registry.MustRegister(inferencePoolAvgQueueSize)
@@ -439,6 +470,10 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(llmdFlowControlRequestEnqueueDuration)
 		metrics.Registry.MustRegister(inferenceModelRewriteDecisionsTotal)
 		metrics.Registry.MustRegister(llmdInferenceModelRewriteDecisionsTotal)
+		metrics.Registry.MustRegister(DataLayerPollErrorsTotal)
+		metrics.Registry.MustRegister(LlmdDataLayerPollErrorsTotal)
+		metrics.Registry.MustRegister(DataLayerExtractErrorsTotal)
+		metrics.Registry.MustRegister(LlmdDataLayerExtractErrorsTotal)
 		for _, collector := range customCollectors {
 			metrics.Registry.MustRegister(collector)
 		}
@@ -468,6 +503,8 @@ func Reset() {
 	llmdRunningRequests.Reset()
 	normalizedTimePerOutputToken.Reset()
 	llmdNormalizedTimePerOutputToken.Reset()
+	llmdRequestTTFT.Reset()
+	llmdRequestTPOT.Reset()
 	inferencePoolAvgKVCache.Reset()
 	llmdInferencePoolAvgKVCache.Reset()
 	inferencePoolAvgQueueSize.Reset()
@@ -496,6 +533,10 @@ func Reset() {
 	llmdFlowControlRequestEnqueueDuration.Reset()
 	inferenceModelRewriteDecisionsTotal.Reset()
 	llmdInferenceModelRewriteDecisionsTotal.Reset()
+	DataLayerPollErrorsTotal.Reset()
+	LlmdDataLayerPollErrorsTotal.Reset()
+	DataLayerExtractErrorsTotal.Reset()
+	LlmdDataLayerExtractErrorsTotal.Reset()
 }
 
 // RecordRequestCounter records the number of requests.
@@ -577,6 +618,43 @@ func RecordNormalizedTimePerOutputToken(ctx context.Context, modelName, targetMo
 
 	normalizedTimePerOutputToken.WithLabelValues(modelName, targetModelName).Observe(secondsPerToken)
 	llmdNormalizedTimePerOutputToken.WithLabelValues(modelName, targetModelName).Observe(secondsPerToken)
+	return true
+}
+
+// RecordRequestTTFT records the time to first token.
+func RecordRequestTTFT(ctx context.Context, modelName, targetModelName, fairnessID, priority string, streaming bool, received time.Time, firstToken time.Time) bool {
+	if firstToken.IsZero() {
+		return false
+	}
+	if !firstToken.After(received) {
+		log.FromContext(ctx).Error(nil, "Request latency values are invalid for TTFT calculation",
+			"modelName", modelName, "targetModelName", targetModelName, "firstTokenTime", firstToken, "receivedTime", received)
+		return false
+	}
+	ttftSeconds := firstToken.Sub(received).Seconds()
+	streamingLabel := "false"
+	if streaming {
+		streamingLabel = "true"
+	}
+	llmdRequestTTFT.WithLabelValues(modelName, targetModelName, fairnessID, priority, streamingLabel).Observe(ttftSeconds)
+	return true
+}
+
+// RecordRequestTPOT records the average time per output token.
+func RecordRequestTPOT(ctx context.Context, modelName, targetModelName, fairnessID, priority string, received time.Time, firstToken time.Time, complete time.Time, outputTokenCount int) bool {
+	if firstToken.IsZero() || outputTokenCount <= 1 {
+		return false
+	}
+	if !firstToken.After(received) || !complete.After(firstToken) {
+		log.FromContext(ctx).Error(nil, "Request latency values are invalid for TPOT calculation",
+			"modelName", modelName, "targetModelName", targetModelName,
+			"receivedTime", received, "firstTokenTime", firstToken, "completeTime", complete)
+		return false
+	}
+	e2eSeconds := complete.Sub(received).Seconds()
+	ttftSeconds := firstToken.Sub(received).Seconds()
+	tpotSeconds := (e2eSeconds - ttftSeconds) / float64(outputTokenCount-1)
+	llmdRequestTPOT.WithLabelValues(modelName, targetModelName, fairnessID, priority).Observe(tpotSeconds)
 	return true
 }
 
@@ -740,4 +818,16 @@ func RecordFlowControlPoolSaturation(inferencePool string, saturation float64) {
 func RecordInferenceModelRewriteDecision(modelRewriteName, modelName, targetModel string) {
 	inferenceModelRewriteDecisionsTotal.WithLabelValues(modelRewriteName, modelName, targetModel).Inc()
 	llmdInferenceModelRewriteDecisionsTotal.WithLabelValues(modelRewriteName, modelName, targetModel).Inc()
+}
+
+// RecordDataLayerPollError increments the poll error counter for a source type.
+func RecordDataLayerPollError(sourceType string) {
+	DataLayerPollErrorsTotal.WithLabelValues(sourceType).Inc()
+	LlmdDataLayerPollErrorsTotal.WithLabelValues(sourceType).Inc()
+}
+
+// RecordDataLayerExtractError increments the extract error counter for a source/extractor type.
+func RecordDataLayerExtractError(sourceType, extractorType string) {
+	DataLayerExtractErrorsTotal.WithLabelValues(sourceType, extractorType).Inc()
+	LlmdDataLayerExtractErrorsTotal.WithLabelValues(sourceType, extractorType).Inc()
 }

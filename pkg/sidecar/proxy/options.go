@@ -39,23 +39,25 @@ import (
 
 const (
 	// Flags
-	port                    = "port"
-	vllmPort                = "vllm-port"
-	dataParallelSize        = "data-parallel-size"
-	kvConnector             = "kv-connector"
-	ecConnector             = "ec-connector"
-	enableSSRFProtection    = "enable-ssrf-protection"
-	enablePrefillerSampling = "enable-prefiller-sampling"
-	enableTLS               = "enable-tls"
-	tlsInsecureSkipVerify   = "tls-insecure-skip-verify"
-	secureServing           = "secure-proxy"
-	certPath                = "cert-path"
-	inferencePool           = "inference-pool"
-	poolGroup               = "pool-group"
-	maxIdleConnsPerHost     = "max-idle-conns-per-host"
-	decodeChunkSize         = "decode-chunk-size"
-	inlineConfiguration     = "configuration"
-	configurationFile       = "configuration-file"
+	port                      = "port"
+	vllmPort                  = "vllm-port"
+	dataParallelSize          = "data-parallel-size"
+	kvConnector               = "kv-connector"
+	ecConnector               = "ec-connector"
+	mooncakeBootstrapPortFlag = "mooncake-bootstrap-port"
+	enableSSRFProtection      = "enable-ssrf-protection"
+	enablePrefillerSampling   = "enable-prefiller-sampling"
+	enableTLS                 = "enable-tls"
+	tlsInsecureSkipVerify     = "tls-insecure-skip-verify"
+	secureServing             = "secure-proxy"
+	certPath                  = "cert-path"
+	inferencePool             = "inference-pool"
+	poolGroup                 = "pool-group"
+	maxIdleConnsPerHost       = "max-idle-conns-per-host"
+	decodeChunkSize           = "decode-chunk-size"
+	inlineConfiguration       = "configuration"
+	configurationFile         = "configuration-file"
+	tracingFlag               = "tracing"
 
 	// Deprecated flags
 	connector                      = "connector"
@@ -64,19 +66,17 @@ const (
 	encoderUseTLS                  = "UseTLSForEncoder"
 	prefillerTLSInsecureSkipVerify = "prefiller-tls-insecure-skip-verify"
 	decoderTLSInsecureSkipVerify   = "decoder-tls-insecure-skip-verify"
-	inferencePoolNamespace         = "inference-pool-namespace"
-	inferencePoolName              = "inference-pool-name"
 
 	// Environment variables
 	envInferencePool           = "INFERENCE_POOL"
-	envInferencePoolNamespace  = "INFERENCE_POOL_NAMESPACE"
-	envInferencePoolName       = "INFERENCE_POOL_NAME"
 	envEnablePrefillerSampling = "ENABLE_PREFILLER_SAMPLING"
+	envMooncakeBootstrapPort   = "MOONCAKE_BOOTSTRAP_PORT"
 
 	// Defaults
-	defaultPort             = "8000"
-	defaultVLLMPort         = "8001"
-	defaultDataParallelSize = 1
+	defaultPort                  = "8000"
+	defaultVLLMPort              = "8001"
+	defaultDataParallelSize      = 1
+	defaultMooncakeBootstrapPort = 8998
 
 	// TLS stages
 	prefillStage = "prefiller"
@@ -88,6 +88,7 @@ const (
 type yamlConfiguration struct {
 	Port                           int      `json:"port,omitempty"`
 	VLLMPort                       int      `json:"vllm-port,omitempty"`
+	MooncakeBootstrapPort          int      `json:"mooncake-bootstrap-port,omitempty"`
 	DataParallelSize               int      `json:"data-parallel-size,omitempty"`
 	KVConnector                    string   `json:"kv-connector,omitempty"`
 	Connector                      string   `json:"connector,omitempty"`
@@ -106,6 +107,7 @@ type yamlConfiguration struct {
 	PoolGroup                      string   `json:"pool-group,omitempty"`
 	MaxIdleConnsPerHost            int      `json:"max-idle-conns-per-host,omitempty"`
 	DecodeChunkSize                int      `json:"decode-chunk-size,omitempty"`
+	Tracing                        *bool    `json:"tracing,omitempty"`
 }
 
 // Options holds the CLI-facing configuration for the pd-sidecar proxy.
@@ -145,11 +147,13 @@ var (
 		KVConnectorNIXLV2:        {},
 		KVConnectorSharedStorage: {},
 		KVConnectorSGLang:        {},
+		KVConnectorMooncake:      {},
 	}
 
 	// supportedECConnectors defines all valid E/P EC connector types
 	supportedECConnectors = map[string]struct{}{
 		ECExampleConnector: {},
+		ECConnectorNIXL:    {},
 	}
 
 	// supportedTLSStages defines all valid stages for TLS configuration
@@ -159,9 +163,10 @@ var (
 		encodeStage:  {},
 	}
 
-	supportedKVConnectorNamesStr = strings.Join([]string{KVConnectorNIXLV2, KVConnectorSharedStorage, KVConnectorSGLang}, ", ")
-	supportedECConnectorNamesStr = strings.Join([]string{ECExampleConnector}, ", ")
-	supportedTLSStageNamesStr    = strings.Join([]string{prefillStage, decodeStage, encodeStage}, ", ")
+	supportedKVConnectorNamesStr = strings.Join([]string{KVConnectorNIXLV2, KVConnectorSharedStorage, KVConnectorSGLang, KVConnectorMooncake}, ", ")
+	supportedECConnectorNamesStr = strings.Join([]string{ECExampleConnector, ECConnectorNIXL}, ", ")
+
+	supportedTLSStageNamesStr = strings.Join([]string{prefillStage, decodeStage, encodeStage}, ", ")
 )
 
 // NewOptions returns a new Options struct initialized with default values.
@@ -171,6 +176,13 @@ func NewOptions() *Options {
 		enablePrefillerSampling = val
 	}
 
+	mooncakeBootstrapPort := defaultMooncakeBootstrapPort
+	if portStr := os.Getenv(envMooncakeBootstrapPort); portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil {
+			mooncakeBootstrapPort = port
+		}
+	}
+
 	return &Options{
 		Config: Config{
 			Port:                    defaultPort,
@@ -178,10 +190,10 @@ func NewOptions() *Options {
 			SecureServing:           true,
 			EnablePrefillerSampling: enablePrefillerSampling,
 			MaxIdleConnsPerHost:     defaultMaxIdleConnsPerHost,
+			MooncakeBootstrapPort:   mooncakeBootstrapPort,
 			PoolGroup:               routing.InferencePoolAPIGroup,
-			InferencePoolNamespace:  os.Getenv(envInferencePoolNamespace),
-			InferencePoolName:       os.Getenv(envInferencePoolName),
 			DecodeChunkSize:         0,
+			Tracing:                 false,
 		},
 		vllmPort:      defaultVLLMPort,
 		inferencePool: os.Getenv(envInferencePool),
@@ -207,12 +219,15 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 		"the KV protocol between prefiller and decoder. Supported: "+supportedKVConnectorNamesStr)
 	fs.StringVar(&opts.ECConnector, ecConnector, opts.ECConnector,
 		"the EC protocol between encoder and prefiller (for EPD mode). Supported: "+supportedECConnectorNamesStr+". Leave empty to skip encoder stage.")
+	fs.IntVar(&opts.MooncakeBootstrapPort, mooncakeBootstrapPortFlag, opts.MooncakeBootstrapPort,
+		"the port used to query the Mooncake bootstrap endpoint on prefill pods (only used with --kv-connector=mooncake)")
 	fs.BoolVar(&opts.SecureServing, secureServing, opts.SecureServing, "Enables secure proxy. Defaults to true.")
 	fs.StringVar(&opts.CertPath, certPath, opts.CertPath, "The path to the certificate for secure proxy. The certificate and private key files are assumed to be named tls.crt and tls.key, respectively. If not set, and secureProxy is enabled, then a self-signed certificate is used (for testing).")
 	fs.BoolVar(&opts.EnableSSRFProtection, enableSSRFProtection, opts.EnableSSRFProtection, "enable SSRF protection using InferencePool allowlisting")
 	fs.BoolVar(&opts.EnablePrefillerSampling, enablePrefillerSampling, opts.EnablePrefillerSampling, "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
 	fs.StringVar(&opts.PoolGroup, poolGroup, opts.PoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
 	fs.IntVar(&opts.DecodeChunkSize, decodeChunkSize, opts.DecodeChunkSize, "enables chunked decode mode when > 0; value is the token budget per chunk. For best performance should be a multiple of the block size.")
+	fs.BoolVar(&opts.Tracing, tracingFlag, opts.Tracing, "Enable OpenTelemetry tracing")
 
 	fs.StringSliceVar(&opts.enableTLS, enableTLS, opts.enableTLS, "stages to enable TLS for. Supported: "+supportedTLSStageNamesStr+". Can be specified multiple times or as comma-separated values.")
 	fs.StringSliceVar(&opts.tlsInsecureSkipVerify, tlsInsecureSkipVerify, opts.tlsInsecureSkipVerify, "stages to skip TLS verification for. Supported: "+supportedTLSStageNamesStr+". Can be specified multiple times or as comma-separated values.")
@@ -231,10 +246,6 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&opts.decoderInsecureSkipVerify, decoderTLSInsecureSkipVerify, opts.decoderInsecureSkipVerify, "Deprecated: use --tls-insecure-skip-verify=decoder instead. Skip TLS verification for requests to decoder.")
 	_ = fs.MarkDeprecated(decoderTLSInsecureSkipVerify, "use --tls-insecure-skip-verify=decoder instead")
 
-	fs.StringVar(&opts.InferencePoolNamespace, inferencePoolNamespace, opts.InferencePoolNamespace, "Deprecated: use --inference-pool instead. The Kubernetes namespace for the InferencePool (defaults to INFERENCE_POOL_NAMESPACE env var)")
-	_ = fs.MarkDeprecated(inferencePoolNamespace, "use --inference-pool instead")
-	fs.StringVar(&opts.InferencePoolName, inferencePoolName, opts.InferencePoolName, "Deprecated: use --inference-pool instead. The specific InferencePool name (defaults to INFERENCE_POOL_NAME env var)")
-	_ = fs.MarkDeprecated(inferencePoolName, "use --inference-pool instead")
 	fs.IntVar(&opts.MaxIdleConnsPerHost, "max-idle-conns-per-host", opts.MaxIdleConnsPerHost, "max idle keep-alive connections per host for reverse proxy transports; set to at least the expected concurrency")
 	fs.StringVar(&opts.inlineConfiguration, inlineConfiguration, "", "Sidecar configuration in YAML provided as inline specification. Example `--configuration={port: 8085, vllm-port: 8203}. Inline configuration and file configuration are mutually exclusive.`")
 	fs.StringVar(&opts.fileConfiguration, configurationFile, "", "Path to file which contains sidecar configuration in YAML. Example `--configuration-file=/etc/config/sidecar-config.yaml`. Inline configuration and file configuration are mutually exclusive.")
@@ -264,7 +275,7 @@ func (opts *Options) Complete() error {
 		opts.KVConnector = opts.connector
 	}
 
-	// Parse inferencePool field (namespace/name or just name), overriding deprecated separate flags
+	// Parse inferencePool field (namespace/name or just name) into Config.
 	if opts.inferencePool != "" {
 		parts := strings.SplitN(opts.inferencePool, "/", 2)
 		if len(parts) == 2 {
@@ -360,13 +371,15 @@ func (opts *Options) Validate() error {
 		return fmt.Errorf("--decode-chunk-size must be a non-negative integer (0 disables chunked decode), got %d", opts.DecodeChunkSize)
 	}
 
+	// Validate mooncake bootstrap port
+	if opts.MooncakeBootstrapPort < 1 || opts.MooncakeBootstrapPort > 65535 {
+		return fmt.Errorf("--mooncake-bootstrap-port must be between 1 and 65535, got %d", opts.MooncakeBootstrapPort)
+	}
+
 	// Validate SSRF protection requirements
 	if opts.EnableSSRFProtection {
-		if opts.InferencePoolNamespace == "" {
-			return errors.New("--inference-pool, --inference-pool-namespace, INFERENCE_POOL, or INFERENCE_POOL_NAMESPACE environment variable is required when --enable-ssrf-protection is true")
-		}
-		if opts.InferencePoolName == "" {
-			return errors.New("--inference-pool, --inference-pool-name, INFERENCE_POOL, or INFERENCE_POOL_NAME environment variable is required when --enable-ssrf-protection is true")
+		if opts.InferencePoolNamespace == "" || opts.InferencePoolName == "" {
+			return errors.New("--inference-pool flag or INFERENCE_POOL environment variable is required when --enable-ssrf-protection is true")
 		}
 	}
 
@@ -451,6 +464,9 @@ func (opts *Options) mergeYAMLConfiguration(cfg yamlConfiguration) {
 	if cfg.VLLMPort != 0 && !opts.isFlagSet(vllmPort) {
 		opts.vllmPort = strconv.Itoa(cfg.VLLMPort)
 	}
+	if cfg.MooncakeBootstrapPort != 0 && !opts.isFlagSet(mooncakeBootstrapPortFlag) {
+		opts.MooncakeBootstrapPort = cfg.MooncakeBootstrapPort
+	}
 	if cfg.DataParallelSize != 0 && !opts.isFlagSet(dataParallelSize) {
 		opts.DataParallelSize = cfg.DataParallelSize
 	}
@@ -517,6 +533,9 @@ func (opts *Options) mergeYAMLConfiguration(cfg yamlConfiguration) {
 	}
 	if cfg.DecodeChunkSize != 0 && !opts.isFlagSet(decodeChunkSize) {
 		opts.DecodeChunkSize = cfg.DecodeChunkSize
+	}
+	if cfg.Tracing != nil && !opts.isFlagSet(tracingFlag) {
+		opts.Tracing = *cfg.Tracing
 	}
 }
 

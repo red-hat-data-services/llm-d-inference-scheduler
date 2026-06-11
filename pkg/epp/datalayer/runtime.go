@@ -371,18 +371,18 @@ func (r *Runtime) NewEndpoint(ctx context.Context, endpointMetadata *fwkdl.Endpo
 	logger, _ := logr.FromContext(ctx)
 	logger = logger.WithValues("endpoint", endpointMetadata.GetNamespacedName())
 
+	endpoint := fwkdl.NewEndpoint(endpointMetadata, nil)
+
 	dispatchers := make([]fwkdl.PollingDispatcher, 0, r.dispatchers.Count())
 	for _, d := range r.dispatchers.Dispatchers() {
 		dispatchers = append(dispatchers, d)
 	}
 	if len(dispatchers) == 0 {
 		logger.Info("No polling sources configured, creating endpoint without collector")
-		endpoint := fwkdl.NewEndpoint(endpointMetadata, nil)
 		r.dispatchEndpointEvent(ctx, logger, fwkdl.EndpointEvent{Type: fwkdl.EventAddOrUpdate, Endpoint: endpoint})
 		return endpoint
 	}
 
-	endpoint := fwkdl.NewEndpoint(endpointMetadata, nil)
 	collector := NewCollector()
 
 	key := endpointMetadata.GetNamespacedName()
@@ -410,6 +410,13 @@ func (r *Runtime) ReleaseEndpoint(ep fwkdl.Endpoint) {
 	if collector, ok := r.collectors.Remove(key); ok {
 		collector.Stop()
 	}
+}
+
+// UpdateEndpoint dispatches an add/update lifecycle event for an existing endpoint.
+func (r *Runtime) UpdateEndpoint(ctx context.Context, ep fwkdl.Endpoint) {
+	logger, _ := logr.FromContext(ctx)
+	logger = logger.WithValues("endpoint", ep.GetMetadata().GetNamespacedName())
+	r.dispatchEndpointEvent(ctx, logger, fwkdl.EndpointEvent{Type: fwkdl.EventAddOrUpdate, Endpoint: ep})
 }
 
 // dispatchEndpointEvent routes an endpoint lifecycle event to all registered

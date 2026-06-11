@@ -25,9 +25,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/go-logr/logr"
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/openai"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
 )
@@ -188,13 +190,14 @@ func TestHandleResponseBody(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			server := &StreamingServer{
-				parser: openai.NewOpenAIParser(),
+				parserRegistry: NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser()}, logr.Discard()),
 			}
 			server.director = &mockDirector{}
 			reqCtx := test.reqCtx
 			if reqCtx == nil {
 				reqCtx = &RequestContext{
-					Response: &Response{},
+					Response:          &Response{},
+					SchedulingRequest: &fwksched.InferenceRequest{FairnessID: metadata.DefaultFairnessID},
 				}
 			}
 			server.HandleResponseBody(ctx, reqCtx, test.body, true)
@@ -247,7 +250,7 @@ func TestHandleStreamedResponseBody(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			server := &StreamingServer{
-				parser: openai.NewOpenAIParser(),
+				parserRegistry: NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser()}, logr.Discard()),
 			}
 			server.director = &mockDirector{}
 			reqCtx := &RequestContext{
@@ -256,6 +259,7 @@ func TestHandleStreamedResponseBody(t *testing.T) {
 						"content-type": "text/event-stream; charset=utf-8",
 					},
 				},
+				SchedulingRequest: &fwksched.InferenceRequest{FairnessID: metadata.DefaultFairnessID},
 			}
 			server.HandleResponseBody(ctx, reqCtx, test.body, true) // Hard coded to true since openAIParser does not endOfStream to switch logic.
 
@@ -318,8 +322,8 @@ func TestHandleResponseBodyModelStreaming_TokenAccumulation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			server := &StreamingServer{
-				parser:   openai.NewOpenAIParser(),
-				director: &mockDirector{},
+				parserRegistry: NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser()}, logr.Discard()),
+				director:       &mockDirector{},
 			}
 			reqCtx := &RequestContext{
 				Response: &Response{
@@ -327,6 +331,7 @@ func TestHandleResponseBodyModelStreaming_TokenAccumulation(t *testing.T) {
 						"content-type": "text/event-stream",
 					},
 				},
+				SchedulingRequest: &fwksched.InferenceRequest{FairnessID: metadata.DefaultFairnessID},
 			}
 
 			for _, chunk := range tc.chunks {
@@ -474,13 +479,14 @@ func TestResponseSizeAccumulation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server := &StreamingServer{
-				parser:   openai.NewOpenAIParser(),
-				director: &mockDirector{},
+				parserRegistry: NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser()}, logr.Discard()),
+				director:       &mockDirector{},
 			}
 			reqCtx := &RequestContext{
 				Response: &Response{
 					Headers: map[string]string{},
 				},
+				SchedulingRequest: &fwksched.InferenceRequest{FairnessID: metadata.DefaultFairnessID},
 			}
 			for i, chunk := range tt.chunks {
 				endOfStream := i == len(tt.chunks)-1
