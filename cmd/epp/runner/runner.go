@@ -60,7 +60,6 @@ import (
 	fcregistry "github.com/llm-d/llm-d-router/pkg/epp/flowcontrol/registry"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
-	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	attrconcurrency "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
 	attrlatency "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/latency"
 	attrmodels "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/models"
@@ -159,7 +158,7 @@ type Runner struct {
 	requestControlConfig *requestcontrol.Config
 	schedulerConfig      *scheduling.SchedulerConfig
 	customCollectors     []prometheus.Collector
-	parser               fwkrh.Parser
+	parserRegistry       *handlers.ParserRegistry
 	dlRuntime            *datalayer.Runtime
 	PluginHandle         fwkplugin.Handle
 	// rawConfig caches the result of parseConfigurationPhaseOne.
@@ -218,9 +217,16 @@ func (r *Runner) Run(ctx context.Context) error {
 	logutil.InitLogging(&opts.ZapOptions)
 
 	if opts.Tracing {
-		err := tracing.InitTracing(ctx, setupLog, "llm-d-router/epp")
+		shutdown, err := tracing.InitTracing(ctx, setupLog, "llm-d-router/epp")
 		if err != nil {
 			return fmt.Errorf("failed to init tracing %w", err)
+		}
+		if shutdown != nil {
+			defer func() {
+				if err := shutdown(context.Background()); err != nil {
+					setupLog.Error(err, "Failed to shutdown tracing")
+				}
+			}()
 		}
 	}
 
@@ -348,6 +354,13 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 		}
 	}
 
+	if r.PluginHandle == nil {
+		setupLog.Info("Plugin state debug handler not registered: plugin handle unavailable")
+	} else if err = runserver.SetupPluginStateDebugHandler(mgr, r.PluginHandle); err != nil {
+		setupLog.Error(err, "Failed to setup plugin state debug handler")
+		return nil, nil, err
+	}
+
 	// --- Initialize Core EPP Components ---
 	if r.schedulerConfig == nil {
 		err := errors.New("scheduler config must be set either by config api or through code")
@@ -366,7 +379,7 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 
 	endpointCandidates := contracts.EndpointCandidates(requestcontrol.NewDatastoreEndpointCandidates(ds,
 		requestcontrol.WithDisableEndpointSubsetFilter(opts.DisableEndpointSubsetFilter)))
-	endpointCandidates, admissionController := r.initAdmissionControl(ctx, opts, eppConfig, endpointCandidates)
+	endpointCandidates, admissionController, priorityBandControlPlane := r.initAdmissionControl(ctx, opts, eppConfig, endpointCandidates)
 
 	director := requestcontrol.NewDirectorWithConfig(ds, scheduler, admissionController, endpointCandidates, r.requestControlConfig)
 
@@ -382,8 +395,9 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 		RefreshPrometheusMetricsInterval: opts.RefreshPrometheusMetricsInterval,
 		MetricsStalenessThreshold:        opts.MetricsStalenessThreshold,
 		Director:                         director,
-		Parser:                           r.parser,
+		ParserRegistry:                   r.parserRegistry,
 		SaturationDetector:               eppConfig.SaturationDetector,
+		PriorityBandControlPlane:         priorityBandControlPlane,
 		GRPCMaxRecvMsgSize:               opts.GRPCMaxRecvMsgSize,
 		GRPCMaxSendMsgSize:               opts.GRPCMaxSendMsgSize,
 	}
@@ -395,7 +409,12 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 
 	// --- Add Runnables to Manager ---
 	// Register health server.
-	if err := registerHealthServer(mgr, ctrl.Log.WithName("health"), ds, opts.GRPCHealthPort, isLeader, opts.EnableLeaderElection, r.parser); err != nil {
+	parsers := r.parserRegistry.Parsers()
+	supporters := make([]appProtocolSupporter, len(parsers))
+	for i, p := range parsers {
+		supporters[i] = p
+	}
+	if err := registerHealthServer(mgr, ctrl.Log.WithName("health"), ds, opts.GRPCHealthPort, isLeader, opts.EnableLeaderElection, supporters); err != nil {
 		return nil, nil, err
 	}
 
@@ -513,7 +532,7 @@ func (r *Runner) registerInTreePlugins() {
 	fwkplugin.RegisterAsDefaultProducer(inflightload.InFlightLoadProducerType, inflightload.InFlightLoadProducerFactory, attrconcurrency.InFlightLoadDataKey)
 	fwkplugin.RegisterAsDefaultProducer(mmproducer.ProducerType, mmproducer.Factory, mmproducer.ProducedKey)
 	fwkplugin.RegisterAsDefaultProducer(latencyproducer.LatencyDataProviderPluginType, latencyproducer.PredictedLatencyFactory, attrlatency.LatencyPredictionInfoDataKey)
-	fwkplugin.Register(tokenizer.PluginType, tokenizer.PluginFactory)
+	fwkplugin.RegisterAsDefaultProducer(tokenizer.PluginType, tokenizer.PluginFactory, tokenizer.TokenizedPromptDataKey)
 	fwkplugin.Register(tokenizer.LegacyPluginType, tokenizer.LegacyPluginFactory) //nolint:staticcheck // intentional: keep backward compatibility
 	fwkplugin.RegisterAsDefaultProducer(sessionid.SessionIDProducerType, sessionid.Factory, attrsession.SessionIDDataKey)
 
@@ -657,7 +676,7 @@ func (r *Runner) parseConfigurationPhaseTwo(ctx context.Context, rawConfig *conf
 	// The plugins will be executed in topologically sorted order to ensure that data is produced before it is consumed.
 	r.requestControlConfig.OrderDataProducerPlugins(dag)
 
-	r.parser = handlers.NewParser(cfg.ParserConfig)
+	r.parserRegistry = cfg.ParserRegistry
 	logger.Info("loaded configuration from file/text successfully")
 
 	return cfg, nil
@@ -699,14 +718,14 @@ func registerExtProcServer(mgr manager.Manager, runner *runserver.ExtProcServerR
 }
 
 // registerHealthServer adds the Health gRPC server as a Runnable to the given manager.
-func registerHealthServer(mgr manager.Manager, logger logr.Logger, ds datastore.Datastore, port int, isLeader *atomic.Bool, leaderElectionEnabled bool, supporter appProtocolSupporter) error {
+func registerHealthServer(mgr manager.Manager, logger logr.Logger, ds datastore.Datastore, port int, isLeader *atomic.Bool, leaderElectionEnabled bool, supporters []appProtocolSupporter) error {
 	srv := grpc.NewServer()
 	healthPb.RegisterHealthServer(srv, &healthServer{
 		logger:                logger,
 		datastore:             ds,
 		isLeader:              isLeader,
 		leaderElectionEnabled: leaderElectionEnabled,
-		supporter:             supporter,
+		supporters:            supporters,
 	})
 	if err := mgr.Add(
 		runnable.NoLeaderElection(runnable.GRPCServer("health", srv, port))); err != nil {
@@ -804,11 +823,12 @@ func (r *Runner) initAdmissionControl(
 	opts *runserver.Options,
 	eppConfig *config.Config,
 	endpointCandidates contracts.EndpointCandidates,
-) (contracts.EndpointCandidates, requestcontrol.AdmissionController) {
+) (contracts.EndpointCandidates, requestcontrol.AdmissionController, contracts.PriorityBandControlPlane) {
 	if !r.featureGates[flowcontrol.FeatureGate] {
 		setupLog.Info("Experimental Flow Control layer is disabled, using legacy admission control")
 		return endpointCandidates,
-			requestcontrol.NewLegacyAdmissionController(eppConfig.SaturationDetector, endpointCandidates)
+			requestcontrol.NewLegacyAdmissionController(eppConfig.SaturationDetector, endpointCandidates),
+			nil
 	}
 	endpointCandidates = requestcontrol.NewCachedEndpointCandidates(ctx, endpointCandidates, 50*time.Millisecond)
 	setupLog.Info("Initializing experimental Flow Control layer")
@@ -824,8 +844,7 @@ func (r *Runner) initAdmissionControl(
 			UsageLimitPolicy:   eppConfig.FlowControlConfig.UsageLimitPolicy,
 		},
 	)
-	go registry.Run(ctx)
-	return endpointCandidates, requestcontrol.NewFlowControlAdmissionController(fc, opts.PoolName)
+	return endpointCandidates, requestcontrol.NewFlowControlAdmissionController(fc, opts.PoolName), registry
 }
 
 // runWithFileDiscovery handles the execution path when a discovery plugin is configured.
@@ -900,7 +919,9 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 	// EndpointPickerConfig.flowControl still apply.
 	endpointCandidates := contracts.EndpointCandidates(requestcontrol.NewDatastoreEndpointCandidates(ds,
 		requestcontrol.WithDisableEndpointSubsetFilter(opts.DisableEndpointSubsetFilter)))
-	endpointCandidates, admissionController := r.initAdmissionControl(ctx, opts, eppConfig, endpointCandidates)
+	// File-discovery mode has no InferenceObjective reconciler to drive the
+	// control plane; static bands from config apply at registry construction.
+	endpointCandidates, admissionController, _ := r.initAdmissionControl(ctx, opts, eppConfig, endpointCandidates)
 	director := requestcontrol.NewDirectorWithConfig(ds, scheduler, admissionController, endpointCandidates, r.requestControlConfig)
 
 	gknn := common.GKNN{
@@ -918,7 +939,7 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 		RefreshPrometheusMetricsInterval: opts.RefreshPrometheusMetricsInterval,
 		MetricsStalenessThreshold:        opts.MetricsStalenessThreshold,
 		Director:                         director,
-		Parser:                           r.parser,
+		ParserRegistry:                   r.parserRegistry,
 		SaturationDetector:               eppConfig.SaturationDetector,
 		GRPCMaxRecvMsgSize:               opts.GRPCMaxRecvMsgSize,
 		GRPCMaxSendMsgSize:               opts.GRPCMaxSendMsgSize,
@@ -938,12 +959,17 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 	isLeader.Store(true)
 
 	healthSrv := grpc.NewServer()
+	parsers := r.parserRegistry.Parsers()
+	ps := make([]appProtocolSupporter, len(parsers))
+	for i, p := range parsers {
+		ps[i] = p
+	}
 	healthPb.RegisterHealthServer(healthSrv, &healthServer{
 		logger:                ctrl.Log.WithName("health"),
 		datastore:             ds,
 		isLeader:              isLeader,
 		leaderElectionEnabled: false,
-		supporter:             r.parser,
+		supporters:            ps,
 	})
 
 	g := newRunnableGroup()

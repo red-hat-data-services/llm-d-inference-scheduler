@@ -74,12 +74,11 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/flowcontrol/registry"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/flowcontrol"
-	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/fairness/globalstrict"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/ordering/fcfs"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/usagelimits"
-	igwtestutils "github.com/llm-d/llm-d-router/test/utils/igw"
+	testutils "github.com/llm-d/llm-d-router/test/utils"
 )
 
 func init() {
@@ -188,9 +187,8 @@ func (r *benchRequest) ReceivedTimestamp() time.Time                   { return 
 
 // setupRegistry provisions the concrete FlowRegistry.
 func setupRegistry(
-	ctx context.Context,
 	b *testing.B,
-	handle plugin.Handle,
+	defaults registry.PriorityBandPolicyDefaults,
 	p priorityLevels,
 ) contracts.FlowRegistry {
 	b.Helper()
@@ -201,7 +199,7 @@ func setupRegistry(
 
 	for i := 0; i < int(p); i++ {
 		band, err := registry.NewPriorityBandConfig(
-			handle, i,
+			i, defaults,
 			registry.WithBandMaxBytes(10_000_000_000), // Prevent capacity-based rejections.
 		)
 		if err != nil {
@@ -210,14 +208,13 @@ func setupRegistry(
 		cfgOpts = append(cfgOpts, registry.WithPriorityBand(band))
 	}
 
-	regCfg, err := registry.NewConfig(handle, cfgOpts...)
+	regCfg, err := registry.NewConfig(defaults, cfgOpts...)
 	if err != nil {
 		b.Fatalf("Failed to create registry config: %v", err)
 	}
 
 	reg := registry.NewFlowRegistry(regCfg, logr.Discard())
-
-	go reg.Run(ctx)
+	// Registry maintenance (GC, priority band sync) runs in the Processor loop started by FlowController.
 	return reg
 }
 
@@ -231,7 +228,7 @@ func setupBenchmarkHarness(
 	customCfg *controller.Config,
 ) (*controller.FlowController, testDetector) {
 	b.Helper()
-	handle := igwtestutils.NewTestHandle(ctx)
+	handle := testutils.NewTestHandle(ctx)
 
 	fPolicy, err := globalstrict.GlobalStrictFairnessPolicyFactory(registry.DefaultFairnessPolicyRef, nil, handle)
 	if err != nil {
@@ -245,7 +242,12 @@ func setupBenchmarkHarness(
 	}
 	handle.AddPlugin(registry.DefaultOrderingPolicyRef, oPolicy)
 
-	reg := setupRegistry(ctx, b, handle, p)
+	defaults := registry.PriorityBandPolicyDefaults{
+		OrderingPolicy: oPolicy.(flowcontrol.OrderingPolicy),
+		FairnessPolicy: fPolicy.(flowcontrol.FairnessPolicy),
+	}
+
+	reg := setupRegistry(b, defaults, p)
 
 	detector := customDetector
 	if detector == nil {

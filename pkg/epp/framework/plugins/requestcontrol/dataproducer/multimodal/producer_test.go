@@ -31,12 +31,16 @@ import (
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	attrmm "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/multimodal"
-
-	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 )
 
+func TestLRUCapacityFromCacheSizeMB(t *testing.T) {
+	assert.Equal(t, 2, lruCapacityFromCacheSizeMB(4))
+	assert.Equal(t, 1024, lruCapacityFromCacheSizeMB(2048))
+	assert.Equal(t, 2048, lruCapacityFromCacheSizeMB(0))
+}
+
 func TestFactory(t *testing.T) {
-	raw, err := json.Marshal(map[string]any{"cacheSize": 4})
+	raw, err := json.Marshal(map[string]any{"cacheSizeInMBPerServer": 4})
 	require.NoError(t, err)
 
 	created, err := Factory("mm-producer", plugin.StrictDecoder(raw), &testHandle{ctx: context.Background()})
@@ -45,7 +49,7 @@ func TestFactory(t *testing.T) {
 	assert.Equal(t, "mm-producer", created.TypedName().Name)
 	assert.Equal(t, ProducerType, created.TypedName().Type)
 
-	_, err = Factory("bad", plugin.StrictDecoder(json.RawMessage(`{"cacheSize":"bad"}`)), &testHandle{ctx: context.Background()})
+	_, err = Factory("bad", plugin.StrictDecoder(json.RawMessage(`{"cacheSizeInMBPerServer":"bad"}`)), &testHandle{ctx: context.Background()})
 	require.Error(t, err)
 }
 
@@ -54,151 +58,53 @@ func TestExtractMMItemsFromTokenizedPrompt(t *testing.T) {
 		Body: &fwkrh.InferenceRequestBody{
 			TokenizedPrompt: &fwkrh.TokenizedPrompt{
 				MultiModalFeatures: []fwkrh.MultiModalFeature{
-					{Hash: "image-a", Length: 576},
-					{Hash: "image-b", Length: 0},
-					{Hash: "image-a", Length: 144},
-				},
-			},
-		},
-	})
-
-	assert.ElementsMatch(t, []attrmm.MatchItem{{Hash: "image-a", Size: 1}, {Hash: "image-b", Size: 1}}, items)
-}
-
-func TestExtractMMItemsFromGenerateFeatures(t *testing.T) {
-	items := ExtractMMItems(&scheduling.InferenceRequest{
-		Body: &fwkrh.InferenceRequestBody{
-			Generate: &fwkrh.GenerateRequest{
-				TokenIDs: []uint32{1, 2, 3},
-				Features: &tokenization.MultiModalFeatures{
-					MMHashes: map[string][]string{
-						"image": {"image-a", "image-b", "image-a"},
-						"audio": {"audio-x", ""},
-					},
+					{Modality: fwkrh.ModalityImage, Hash: "image-a", Length: 576},
+					{Modality: fwkrh.ModalityImage, Hash: "image-b", Length: 0},
+					{Modality: fwkrh.ModalityImage, Hash: "image-a", Length: 144},
 				},
 			},
 		},
 	})
 
 	assert.ElementsMatch(t, []attrmm.MatchItem{
-		{Hash: "image-a", Size: 1},
-		{Hash: "image-b", Size: 1},
-		{Hash: "audio-x", Size: 1},
+		{Hash: "image-a", Size: 1, Modality: string(fwkrh.ModalityImage)},
+		{Hash: "image-b", Size: 1, Modality: string(fwkrh.ModalityImage)},
 	}, items)
 }
 
-func TestExtractMMItemsGenerateWithoutFeaturesReturnsNil(t *testing.T) {
+func TestExtractMMItemsNilTokenizedPromptReturnsNil(t *testing.T) {
+	items := ExtractMMItems(&scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{},
+	})
+	assert.Nil(t, items)
+}
+
+func TestExtractMMItemsEmptyMultiModalFeaturesReturnsNil(t *testing.T) {
 	items := ExtractMMItems(&scheduling.InferenceRequest{
 		Body: &fwkrh.InferenceRequestBody{
-			Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{1, 2, 3}},
+			TokenizedPrompt: &fwkrh.TokenizedPrompt{},
 		},
 	})
 	assert.Nil(t, items)
 }
 
-func TestExtractMMItemsFromStructuredChat(t *testing.T) {
-	request := &scheduling.InferenceRequest{
-		Body: &fwkrh.InferenceRequestBody{
-			ChatCompletions: &fwkrh.ChatCompletionsRequest{
-				Messages: []fwkrh.Message{{
-					Role: "user",
-					Content: fwkrh.Content{Structured: []fwkrh.ContentBlock{
-						{Type: "text", Text: "describe"},
-						{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://example.com/cat.png"}},
-						{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://example.com/cat.png"}},
-						{Type: "video_url", VideoURL: fwkrh.VideoBlock{URL: "https://example.com/cat.mp4"}},
-					}},
-				}},
-			},
-		},
-	}
-
-	items := ExtractMMItems(request)
-	assert.ElementsMatch(t, []attrmm.MatchItem{
-		{Hash: contentHash("video_url", "https://example.com/cat.mp4"), Size: 1},
-		{Hash: contentHash("image_url", "https://example.com/cat.png"), Size: 1},
-	}, items)
-}
-
-func TestExtractMMItemsFromStructuredChatAudio(t *testing.T) {
+func TestExtractMMItemsIgnoresProtocolStructs(t *testing.T) {
+	// Protocol structs carry multimodal content but are never read; only the
+	// tokenized prompt's features count.
 	items := ExtractMMItems(&scheduling.InferenceRequest{
 		Body: &fwkrh.InferenceRequestBody{
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
 				Messages: []fwkrh.Message{{
 					Role: "user",
 					Content: fwkrh.Content{Structured: []fwkrh.ContentBlock{
-						{Type: "input_audio", InputAudio: fwkrh.AudioBlock{Format: "wav", Data: "base64-audio"}},
+						{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://example.com/cat.png"}},
 					}},
 				}},
 			},
 		},
 	})
 
-	assert.Equal(t, []attrmm.MatchItem{{
-		Hash: contentHash("input_audio", "wav:base64-audio"),
-		Size: 1,
-	}}, items)
-}
-
-func TestExtractMMItemsIgnoresGenericPayload(t *testing.T) {
-	items := ExtractMMItems(&scheduling.InferenceRequest{
-		Body: &fwkrh.InferenceRequestBody{
-			Payload: fwkrh.PayloadMap{
-				"messages": []any{
-					map[string]any{
-						"content": []any{
-							map[string]any{
-								"type":      "image_url",
-								"image_url": map[string]any{"url": "https://example.com/cat.png"},
-							},
-						},
-					},
-				},
-			},
-		},
-	})
-
 	assert.Nil(t, items)
-}
-
-func TestExtractMMItemsIgnoresGenericResponsesAndConversationsContent(t *testing.T) {
-	responseItems := ExtractMMItems(&scheduling.InferenceRequest{
-		Body: &fwkrh.InferenceRequestBody{
-			Responses: &fwkrh.ResponsesRequest{
-				Input: []any{
-					map[string]any{
-						"type": "message",
-						"content": []any{
-							map[string]any{
-								"type":      "image_url",
-								"image_url": map[string]any{"url": "https://example.com/cat.png"},
-							},
-						},
-					},
-				},
-			},
-		},
-	})
-
-	conversationItems := ExtractMMItems(&scheduling.InferenceRequest{
-		Body: &fwkrh.InferenceRequestBody{
-			Conversations: &fwkrh.ConversationsRequest{
-				Items: []fwkrh.ConversationItem{{
-					Type: "message",
-					Role: "user",
-					Content: []any{
-						map[string]any{
-							"type":      "image_url",
-							"image_url": map[string]any{"url": "https://example.com/cat.png"},
-						},
-					},
-				}},
-			},
-		},
-	})
-
-	assert.Nil(t, responseItems)
-	assert.Nil(t, conversationItems)
 }
 
 func TestProduceMatchesMultiplePodsAndPreRequestUpdatesPlacement(t *testing.T) {
@@ -215,15 +121,16 @@ func TestProduceMatchesMultiplePodsAndPreRequestUpdatesPlacement(t *testing.T) {
 
 	require.NoError(t, producer.Produce(context.Background(), request, []scheduling.Endpoint{endpointA, endpointB, endpointC}))
 
+	img := string(fwkrh.ModalityImage)
 	assertMatchInfo(t, producer, endpointA,
-		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1}},
-		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1}, {Hash: "hash-c", Size: 1}})
+		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1, Modality: img}},
+		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1, Modality: img}, {Hash: "hash-c", Size: 1, Modality: img}})
 	assertMatchInfo(t, producer, endpointB,
-		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1}},
-		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1}, {Hash: "hash-c", Size: 1}})
+		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1, Modality: img}},
+		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1, Modality: img}, {Hash: "hash-c", Size: 1, Modality: img}})
 	assertMatchInfo(t, producer, endpointC,
 		nil,
-		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1}, {Hash: "hash-c", Size: 1}})
+		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1, Modality: img}, {Hash: "hash-c", Size: 1, Modality: img}})
 
 	producer.PreRequest(context.Background(), request, schedulingResult(endpointC))
 	producer.wg.Wait()
@@ -236,7 +143,7 @@ func TestProduceMatchesMultiplePodsAndPreRequestUpdatesPlacement(t *testing.T) {
 }
 
 func TestLRUEviction(t *testing.T) {
-	producer := newTestProducer(t, &Parameters{CacheSize: 2}, nil)
+	producer := newTestProducer(t, &Parameters{CacheSizeInMBPerServer: 4}, nil)
 	endpoint := newEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "pod-a"})
 
 	for _, hash := range []string{"hash-1", "hash-2", "hash-3"} {
@@ -268,12 +175,13 @@ func TestStalePodCleanup(t *testing.T) {
 	endpointB := newEndpoint(podB)
 	require.NoError(t, producer.Produce(context.Background(), requestWithHashes("req", map[string]int{"hash-a": 1}), []scheduling.Endpoint{endpointA, endpointB}))
 
+	img := string(fwkrh.ModalityImage)
 	assertMatchInfo(t, producer, endpointA,
-		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1}},
-		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1}})
+		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1, Modality: img}},
+		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1, Modality: img}})
 	assertMatchInfo(t, producer, endpointB,
 		nil,
-		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1}})
+		[]attrmm.MatchItem{{Hash: "hash-a", Size: 1, Modality: img}})
 }
 
 func TestProducerEndpointExtractorInterfaceContract(t *testing.T) {
@@ -353,7 +261,7 @@ func newEndpoint(name k8stypes.NamespacedName) scheduling.Endpoint {
 func requestWithHashes(requestID string, hashToWeight map[string]int) *scheduling.InferenceRequest {
 	features := make([]fwkrh.MultiModalFeature, 0, len(hashToWeight))
 	for hash, weight := range hashToWeight {
-		features = append(features, fwkrh.MultiModalFeature{Hash: hash, Length: weight})
+		features = append(features, fwkrh.MultiModalFeature{Modality: fwkrh.ModalityImage, Hash: hash, Length: weight})
 	}
 	return &scheduling.InferenceRequest{
 		RequestID: requestID,

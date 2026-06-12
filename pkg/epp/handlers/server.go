@@ -30,7 +30,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -40,13 +40,14 @@ import (
 	envoy "github.com/llm-d/llm-d-router/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/datalayer"
+	fwkrequest "github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
-	"github.com/llm-d/llm-d-router/version"
 )
 
 // EvictChannelLookup is an optional interface for looking up eviction channels by request ID.
@@ -58,11 +59,11 @@ type EvictChannelLookup interface {
 	Deregister(requestID string)
 }
 
-func NewStreamingServer(datastore Datastore, director Director, parser fwkrh.Parser, maxPoolBufferSize int) *StreamingServer {
+func NewStreamingServer(datastore Datastore, director Director, parserRegistry *ParserRegistry, maxPoolBufferSize int) *StreamingServer {
 	return &StreamingServer{
 		director:          director,
 		datastore:         datastore,
-		parser:            parser,
+		parserRegistry:    parserRegistry,
 		maxPoolBufferSize: maxPoolBufferSize,
 		bufferPool: sync.Pool{
 			New: func() any {
@@ -93,7 +94,7 @@ type Datastore interface {
 type StreamingServer struct {
 	datastore         Datastore
 	director          Director
-	parser            fwkrh.Parser
+	parserRegistry    *ParserRegistry
 	evictionLookup    EvictChannelLookup // optional, set for eviction support
 	bufferPool        sync.Pool
 	maxPoolBufferSize int
@@ -112,6 +113,7 @@ type RequestContext struct {
 	ObjectiveKey              string
 	Priority                  int
 	RequestReceivedTimestamp  time.Time
+	FirstTokenTimestamp       time.Time
 	ResponseCompleteTimestamp time.Time
 	RequestSize               int
 	Usage                     fwkrh.Usage
@@ -121,6 +123,7 @@ type RequestContext struct {
 	ResponseStatusCode        string
 	RequestRunning            bool
 	Request                   *Request
+	Parser                    fwkrh.Parser
 
 	SchedulingRequest *fwksched.InferenceRequest
 
@@ -160,11 +163,12 @@ const (
 	BodyResponseResponsesComplete    StreamRequestState = 6
 	TrailerResponseResponsesComplete StreamRequestState = 7
 	// RequestEvicted indicates the request was evicted by flow control.
-	// The state machine sends an ImmediateResponse(429) to Envoy.
+	// The state machine sends an ImmediateResponse(429) to the proxy.
 	RequestEvicted StreamRequestState = 8
-	// RequestSkipped indicates the request parsing was skipped.
-	// The state machine sends a RequestHeadersResponse and RequestBodyResponse with fallback routing(randomly pick an endpoint from inferencePool) to Envoy.
-	RequestSkipped StreamRequestState = 9
+	// RequestResponseProcessingSkipped indicates that EPP response-phase stream interception was skipped for this request.
+	// The state machine sends a RequestHeadersResponse and RequestBodyResponse with the routing decision
+	// from the scheduling director to the proxy, and then gracefully closes the stream to stop further external processing.
+	RequestResponseProcessingSkipped StreamRequestState = 9
 )
 
 // recvResult holds the result of a srv.Recv() call from the reader goroutine.
@@ -173,19 +177,59 @@ type recvResult struct {
 	err error
 }
 
+func (s *StreamingServer) getOrResolveParser(ctx context.Context, reqCtx *RequestContext) (fwkrh.Parser, error) {
+	if reqCtx.Parser != nil {
+		return reqCtx.Parser, nil
+	}
+
+	logger := log.FromContext(ctx)
+	var headers map[string]string
+	if reqCtx.Request != nil {
+		headers = reqCtx.Request.Headers
+	}
+	path := fwkrequest.GetRequestPath(headers)
+	parser, err := s.parserRegistry.Resolve(path)
+	if err != nil {
+		logger.Error(err, "Error resolving parser for path", "path", path)
+		return nil, err
+	}
+
+	reqCtx.Parser = parser
+	return parser, nil
+}
+
+// extractTraceContext returns ctx augmented with the upstream trace context
+// carried in the incoming Envoy request headers (e.g. the traceparent set by the
+// client or the Gateway), using the globally configured text map propagator.
+//
+// The header wire format is the W3C Trace Context spec:
+// https://www.w3.org/TR/trace-context/
+// Extraction uses OpenTelemetry context propagation:
+// https://opentelemetry.io/docs/concepts/context-propagation/
+func extractTraceContext(ctx context.Context, req *extProcPb.ProcessingRequest_RequestHeaders) context.Context {
+	carrier := make(propagation.MapCarrier)
+	if req != nil && req.RequestHeaders != nil && req.RequestHeaders.Headers != nil {
+		for _, header := range req.RequestHeaders.Headers.Headers {
+			carrier[strings.ToLower(header.Key)] = envoy.GetHeaderValue(header)
+		}
+	}
+	return otel.GetTextMapPropagator().Extract(ctx, carrier)
+}
+
 func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer) error {
 	ctx := srv.Context()
 
 	// Start tracing span for the request
-	tracer := otel.Tracer(
-		"llm-d-router/epp/extproc",
-		trace.WithInstrumentationVersion(version.BuildRef),
-		trace.WithInstrumentationAttributes(
-			attribute.String("commit-sha", version.CommitSHA),
-		),
-	)
-	ctx, span := tracer.Start(ctx, "gateway.request", trace.WithSpanKind(trace.SpanKindServer))
-	defer span.End()
+	tracer := tracing.Tracer("llm-d-router/epp/extproc")
+	// The server span is started in the RequestHeaders branch, once the upstream
+	// trace context carried in the incoming headers is available, so the EPP span
+	// joins the caller's trace instead of starting a disconnected root.
+	var span trace.Span
+	defer func() {
+		if span != nil {
+			span.End()
+		}
+	}()
 
 	logger := log.FromContext(ctx)
 	loggerTrace := logger.V(logutil.TRACE)
@@ -326,6 +370,13 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			loggerTrace = logger.V(logutil.TRACE)
 			ctx = log.IntoContext(ctx, logger)
 
+			// Re-parent the server span to the upstream trace context (e.g. the
+			// traceparent set by the client or the Gateway) carried in the incoming
+			// headers, then start it. The headers are only available here, so the span
+			// cannot be started at the top of Process without orphaning the trace.
+			ctx = extractTraceContext(ctx, v)
+			ctx, span = tracer.Start(ctx, "gateway.request", trace.WithSpanKind(trace.SpanKindServer))
+
 			err = s.HandleRequestHeaders(ctx, reqCtx, v)
 		case *extProcPb.ProcessingRequest_RequestBody:
 			loggerTrace.Info("Incoming body chunk", "EoS", v.RequestBody.EndOfStream)
@@ -342,19 +393,16 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				reqCtx.RequestSize = buf.Len()
 				buf.Reset()
 
-				parseResult, parseErr := s.parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
+				parser, resolveErr := s.getOrResolveParser(ctx, reqCtx)
+				if resolveErr != nil {
+					err = errcommon.Error{Code: errcommon.BadRequest, Msg: resolveErr.Error()}
+					logger.Error(err, "Error resolving parser for request body")
+					break
+				}
+				parseResult, parseErr := parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
 				if parseErr != nil {
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: parseErr.Error()}
 					logger.Error(err, "Error parsing request")
-					break
-				}
-
-				if parseResult.Skip {
-					if err = s.fallbackToRandomEndpoint(ctx, reqCtx, reqCtx.RequestSize); err != nil {
-						logger.Error(err, "Error falling back to random endpoint")
-						break
-					}
-					reqCtx.RequestState = RequestSkipped
 					break
 				}
 
@@ -380,6 +428,10 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				reqCtx.reqBodyResp = envoy.GenerateRequestBodyResponses(reqCtx.Request.RawBody)
 				metrics.RecordRequestCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.Priority)
 				metrics.RecordRequestSizes(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.RequestSize)
+
+				if parseResult.SkipResponseProcessing {
+					reqCtx.RequestState = RequestResponseProcessingSkipped
+				}
 			}
 		case *extProcPb.ProcessingRequest_RequestTrailers:
 			// This is currently unused.
@@ -451,8 +503,10 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		if err := reqCtx.updateStateAndSendIfNeeded(srv, logger); err != nil {
 			return err
 		}
-		if reqCtx.RequestState == RequestSkipped {
-			logger.V(logutil.DEFAULT).Info("EPP skipped the request")
+		if reqCtx.RequestState == RequestResponseProcessingSkipped {
+			logger.V(logutil.DEFAULT).Info("EPP skipped response interception, routed request",
+				"targetEndpoint", reqCtx.TargetEndpoint,
+				"targetModel", reqCtx.TargetModelName)
 			// Gracefully close the gRPC stream to stop external processing for this request.
 			// This ensures Envoy continues with the request without calling further phases.
 			// See: https://github.com/envoyproxy/envoy/blob/0533de0acca281110945e5726bbb306fbb12bde5/api/envoy/service/ext_proc/v3/external_processor.proto#L40-L41
@@ -534,8 +588,8 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 		})
 	}
 
-	// Handle skip — send response with fallback routing to the proxy.
-	if r.RequestState == RequestSkipped {
+	// Handle skip — send response with the director's routing decision to the proxy.
+	if r.RequestState == RequestResponseProcessingSkipped {
 		if r.reqHeaderResp != nil {
 			if err := srv.Send(r.reqHeaderResp); err != nil {
 				logger.Error(err, "error sending response")

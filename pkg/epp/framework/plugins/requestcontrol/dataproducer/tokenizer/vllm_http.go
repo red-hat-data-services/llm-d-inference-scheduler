@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ import (
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
+
+	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 )
 
 const (
@@ -117,10 +120,21 @@ func parseHTTPDuration(s string, def time.Duration) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
 
-// Render calls /v1/completions/render. Char offsets are not provided by vLLM's
-// render endpoint and the upstream call site discards them, so we return nil.
-func (r *vllmHTTPRenderer) Render(ctx context.Context, prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
-	body := completionsRenderRequest{Model: r.modelName, Prompt: prompt}
+// Render calls /v1/completions/render. The PayloadMap is forwarded verbatim
+// (preserving backend-specific fields such as reasoning) with the configured
+// model name stamped in. Char offsets are not returned by vLLM's render endpoint.
+func (r *vllmHTTPRenderer) Render(ctx context.Context, payload fwkrh.RequestPayload) ([]uint32, []tokenizerTypes.Offset, error) {
+	pm, ok := payload.AsMap()
+	if !ok {
+		return nil, nil, errors.New("vLLM HTTP tokenizer requires a parsed PayloadMap")
+	}
+	// Shallow copy is sufficient because only the top-level model field is stamped in.
+	body := maps.Clone(pm)
+	body["model"] = r.modelName // `vllm launch render` requires the base model name
+	return r.postCompletionsRender(ctx, body)
+}
+
+func (r *vllmHTTPRenderer) postCompletionsRender(ctx context.Context, body any) ([]uint32, []tokenizerTypes.Offset, error) {
 	var resp []renderResponse
 	if err := r.postJSON(ctx, completionsRenderPath, body, r.timeout, &resp); err != nil {
 		return nil, nil, err
@@ -131,34 +145,56 @@ func (r *vllmHTTPRenderer) Render(ctx context.Context, prompt string) ([]uint32,
 	return resp[0].TokenIDs, nil, nil
 }
 
-// RenderChat calls /v1/chat/completions/render with an OpenAI-shaped request
-// body, then converts the response's wire-format multimodal features into the
-// kvcache map shape expected by the upstream interface.
-func (r *vllmHTTPRenderer) RenderChat(ctx context.Context, req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
-	body := buildChatRenderRequest(r.modelName, req)
+// RenderChat calls /v1/chat/completions/render. The PayloadMap is forwarded
+// verbatim with the configured model name stamped in.
+func (r *vllmHTTPRenderer) RenderChat(ctx context.Context, payload fwkrh.RequestPayload) ([]uint32, *tokenization.MultiModalFeatures, error) {
+	pm, ok := payload.AsMap()
+	if !ok {
+		return nil, nil, errors.New("vLLM HTTP tokenizer requires a parsed PayloadMap")
+	}
+	// Shallow copy is sufficient because only the top-level model field is stamped in.
+	body := maps.Clone(pm)
+	body["model"] = r.modelName // `vllm launch render` requires the base model name
+	return r.postChatRender(ctx, body, r.chatTimeout(pm))
+}
+
+func (r *vllmHTTPRenderer) postChatRender(ctx context.Context, body any, timeout time.Duration) ([]uint32, *tokenization.MultiModalFeatures, error) {
 	var resp renderResponse
-	if err := r.postJSON(ctx, chatRenderPath, body, r.chatTimeout(req), &resp); err != nil {
+	if err := r.postJSON(ctx, chatRenderPath, body, timeout, &resp); err != nil {
 		return nil, nil, err
 	}
 	return resp.TokenIDs, toKVCacheMM(resp.Features), nil
 }
 
-func (r *vllmHTTPRenderer) chatTimeout(req *tokenizerTypes.RenderChatRequest) time.Duration {
-	for _, msg := range req.Conversation {
-		if len(msg.Content.Structured) > 0 {
+func (r *vllmHTTPRenderer) chatTimeout(payload fwkrh.PayloadMap) time.Duration {
+	messages, ok := payload["messages"].([]any)
+	if !ok {
+		return r.timeout
+	}
+	for _, rawMessage := range messages {
+		message, ok := rawMessage.(map[string]any)
+		if !ok {
+			continue
+		}
+		// Array-shaped content may require multimodal rendering; use the longer timeout.
+		if parts, ok := message["content"].([]any); ok && len(parts) > 0 {
 			return r.mmTimeout
 		}
 	}
 	return r.timeout
 }
 
-// completionsRenderRequest is the wire body for POST /v1/completions/render.
-type completionsRenderRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
+// produceTimeout returns the worst-case configured render timeout (multimodal),
+// surfaced so the data-producer executor extends its budget past the default.
+func (r *vllmHTTPRenderer) produceTimeout() time.Duration {
+	if r.mmTimeout > r.timeout {
+		return r.mmTimeout
+	}
+	return r.timeout
 }
 
 // chatRenderRequest is the wire body for POST /v1/chat/completions/render.
+// Used by the non-PayloadMap fallback path (gRPC, warmup).
 type chatRenderRequest struct {
 	Model                string         `json:"model"`
 	Messages             []chatMessage  `json:"messages"`
@@ -173,8 +209,9 @@ type chatRenderRequest struct {
 // chatMessage is one OpenAI-shaped message. Content is either a plain string
 // or an array of parts; chatContent's MarshalJSON picks the right wire form.
 type chatMessage struct {
-	Role    string      `json:"role"`
-	Content chatContent `json:"content"`
+	Role      string      `json:"role"`
+	Content   chatContent `json:"content"`
+	ToolCalls []any       `json:"tool_calls,omitempty"`
 }
 
 // chatContent serializes either Raw (string) or Parts (array of typed parts).
@@ -208,7 +245,11 @@ type chatImageURL struct {
 func buildChatRenderRequest(model string, req *tokenizerTypes.RenderChatRequest) chatRenderRequest {
 	msgs := make([]chatMessage, len(req.Conversation))
 	for idx, c := range req.Conversation {
-		msgs[idx] = chatMessage{Role: c.Role, Content: toChatContent(c.Content)}
+		msgs[idx] = chatMessage{
+			Role:      c.Role,
+			Content:   toChatContent(c.Content),
+			ToolCalls: c.ToolCalls,
+		}
 	}
 	return chatRenderRequest{
 		Model:                model,

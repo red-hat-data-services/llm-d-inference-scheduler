@@ -41,27 +41,32 @@ const ModalityImage Modality = "image"
 type RequestPayload interface {
 	isRequestPayload()
 	IsParsed() bool
+	// AsMap returns the parsed JSON map
+	AsMap() (PayloadMap, bool)
 }
 
 // PayloadMap represents a JSON request body unmarshaled into a map.
 type PayloadMap map[string]any
 
-func (PayloadMap) isRequestPayload() {}
-func (PayloadMap) IsParsed() bool    { return true }
+func (p PayloadMap) isRequestPayload()         {}
+func (p PayloadMap) IsParsed() bool            { return true }
+func (p PayloadMap) AsMap() (PayloadMap, bool) { return p, p != nil }
 
 // PayloadProto represents a gRPC request body unmarshaled into a proto.Message.
 type PayloadProto struct {
 	proto.Message
 }
 
-func (PayloadProto) isRequestPayload() {}
-func (PayloadProto) IsParsed() bool    { return true }
+func (PayloadProto) isRequestPayload()         {}
+func (PayloadProto) IsParsed() bool            { return true }
+func (PayloadProto) AsMap() (PayloadMap, bool) { return nil, false }
 
 // RawPayload represents an unparsed request body kept as raw bytes.
 type RawPayload []byte
 
-func (RawPayload) isRequestPayload() {}
-func (RawPayload) IsParsed() bool    { return false }
+func (RawPayload) isRequestPayload()         {}
+func (RawPayload) IsParsed() bool            { return false }
+func (RawPayload) AsMap() (PayloadMap, bool) { return nil, false }
 
 // InferenceRequestBody contains the request-body fields that we parse out as user input,
 // to be used in forming scheduling decisions.
@@ -103,6 +108,8 @@ type TokenizedPrompt struct {
 	// MultiModalFeatures holds one entry per multimodal item in prompt order.
 	// Nil if the prompt contains no multimodal content.
 	MultiModalFeatures []MultiModalFeature
+	// CacheSalt isolates prefix caches across requests. Populated by the token-producer.
+	CacheSalt string
 }
 
 // MultiModalFeature holds all data needed for prefix-cache scoring of a single
@@ -117,96 +124,6 @@ type MultiModalFeature struct {
 	Offset int
 	// Length is the number of placeholder tokens this item occupies in TokenIDs.
 	Length int
-}
-
-// PromptText returns a plain-text representation of the prompt from whichever
-// API type is populated, analogous to CacheSalt().
-func (r *InferenceRequestBody) PromptText() string {
-	switch {
-	case r.Completions != nil:
-		return r.Completions.Prompt.PlainText()
-	case r.ChatCompletions != nil:
-		var sb strings.Builder
-		for _, msg := range r.ChatCompletions.Messages {
-			text := msg.Content.PlainText()
-			if text != "" {
-				sb.WriteString(text)
-				sb.WriteString(" ")
-			}
-		}
-		return sb.String()
-	case r.Messages != nil:
-		var sb strings.Builder
-		sysText := r.Messages.System.PlainText()
-		if sysText != "" {
-			sb.WriteString(sysText)
-			sb.WriteString(" ")
-		}
-		for _, msg := range r.Messages.Messages {
-			text := msg.Content.PlainText()
-			if text != "" {
-				sb.WriteString(text)
-				sb.WriteString(" ")
-			}
-		}
-		return sb.String()
-	case r.Responses != nil:
-		if s, ok := r.Responses.Input.(string); ok {
-			return s
-		}
-		b, _ := json.Marshal(r.Responses.Input)
-		return string(b)
-	case r.Conversations != nil:
-		b, _ := json.Marshal(r.Conversations.Items)
-		return string(b)
-	case r.Embeddings != nil:
-		return r.Embeddings.Input.PlainText()
-	case r.Generate != nil:
-		return ""
-	default:
-		return ""
-	}
-}
-
-// InputTokenCountHint returns a best-effort input token count when the
-// caller knows it exactly (token-ID inputs), or -1 when the count has
-// to be estimated from text.
-func (r *InferenceRequestBody) InputTokenCountHint() int {
-	if r.Completions != nil {
-		return r.Completions.Prompt.TokenCountHint()
-	}
-	if r.Embeddings != nil {
-		return r.Embeddings.Input.TokenCountHint()
-	}
-	if r.Generate != nil {
-		return len(r.Generate.TokenIDs)
-	}
-	return -1
-}
-
-func (r *InferenceRequestBody) CacheSalt() string {
-	if r.Conversations != nil {
-		return r.Conversations.CacheSalt
-	}
-	if r.Responses != nil {
-		return r.Responses.CacheSalt
-	}
-	if r.ChatCompletions != nil {
-		return r.ChatCompletions.CacheSalt
-	}
-	if r.Messages != nil {
-		return r.Messages.CacheSalt
-	}
-	if r.Completions != nil {
-		return r.Completions.CacheSalt
-	}
-	if r.Embeddings != nil {
-		return r.Embeddings.CacheSalt
-	}
-	if r.Generate != nil {
-		return r.Generate.CacheSalt
-	}
-	return ""
 }
 
 // Prompt represents the prompt field in a /v1/completions request.
@@ -555,6 +472,8 @@ type Message struct {
 	Role string `json:"role,omitempty"`
 	// Content defines text of this message
 	Content Content `json:"content"`
+	// ToolCalls contains assistant tool calls for chat template rendering.
+	ToolCalls []any `json:"tool_calls,omitempty"`
 }
 
 type Content struct {
@@ -660,7 +579,7 @@ func (r *MessagesRequest) String() string {
 	}
 	messagesLen := 0
 	for _, msg := range r.Messages {
-		messagesLen += len(msg.Content.PlainText())
+		messagesLen += msg.Content.textLen()
 	}
 	return fmt.Sprintf("{MessagesLength: %d}", messagesLen)
 }
@@ -703,18 +622,17 @@ func (ac AnthropicContent) MarshalJSON() ([]byte, error) {
 	return json.Marshal("")
 }
 
-func (ac AnthropicContent) PlainText() string {
+func (ac AnthropicContent) textLen() int {
 	if ac.Raw != "" {
-		return ac.Raw
+		return len(ac.Raw)
 	}
-	var sb strings.Builder
+	n := 0
 	for _, block := range ac.Structured {
 		if block.Type == "text" {
-			sb.WriteString(block.Text)
-			sb.WriteString(" ")
+			n += len(block.Text)
 		}
 	}
-	return sb.String()
+	return n
 }
 
 type AnthropicContentBlock struct {
