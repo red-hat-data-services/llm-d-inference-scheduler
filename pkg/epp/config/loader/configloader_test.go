@@ -46,13 +46,16 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/ordering/fcfs"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/usagelimits"
 	reqdataprodprefix "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/approximateprefix"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/anthropic"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/openai"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/vertexai"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/vllmhttp"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/picker/maxscore"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/profilehandler/single"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/queuedepth"
-	igwtestutils "github.com/llm-d/llm-d-router/test/utils/igw"
+	testutils "github.com/llm-d/llm-d-router/test/utils"
 )
 
 // Define constants for test plugins.
@@ -296,8 +299,8 @@ func TestLoadRawConfiguration(t *testing.T) {
 				},
 				FeatureGates: configapi.FeatureGates{},
 				RequestHandler: &configapi.RequestHandlerConfig{
-					Parser: &configapi.ParserConfig{
-						PluginRef: "openai-parser",
+					Parsers: []configapi.ParserConfig{
+						{PluginRef: "openai-parser"},
 					},
 				},
 				Parser: &configapi.ParserConfig{
@@ -503,19 +506,27 @@ func TestInstantiateAndConfigure(t *testing.T) {
 			configText: successParserConfigText,
 			wantErr:    false,
 			validate: func(t *testing.T, handle fwkplugin.Handle, rawCfg *configapi.EndpointPickerConfig, cfg *config.Config) {
-				require.NotNil(t, cfg.ParserConfig, "Parser config should be loaded")
-				require.Equal(t, "openai-parser", cfg.ParserConfig.Parser.TypedName().Name, "Should have openai parser name")
-				require.Equal(t, openai.OpenAIParserType, cfg.ParserConfig.Parser.TypedName().Type, "Should contain openai parser type")
+				require.NotNil(t, cfg.ParserRegistry, "Parser registry should be loaded")
+				parsers := cfg.ParserRegistry.Parsers()
+				require.Len(t, parsers, 1, "Should have one parser")
+				require.Equal(t, "openai-parser", parsers[0].TypedName().Name, "Should have openai parser name")
+				require.Equal(t, openai.OpenAIParserType, parsers[0].TypedName().Type, "Should contain openai parser type")
 			},
 		},
 		{
-			name:       "Success - Config without parser and a default openai parser is injected",
+			name:       "Success - Config without parser and default parsers are injected",
 			configText: successWithNoParserConfigText,
 			wantErr:    false,
 			validate: func(t *testing.T, handle fwkplugin.Handle, rawCfg *configapi.EndpointPickerConfig, cfg *config.Config) {
-				require.NotNil(t, cfg.ParserConfig, "Parser config should be loaded")
-				require.Equal(t, "openai-parser", cfg.ParserConfig.Parser.TypedName().Name, "Should have openai parser name")
-				require.Equal(t, openai.OpenAIParserType, cfg.ParserConfig.Parser.TypedName().Type, "Should contain openai parser type")
+				require.NotNil(t, cfg.ParserRegistry, "Parser registry should be loaded")
+				parsers := cfg.ParserRegistry.Parsers()
+				require.Len(t, parsers, 3, "Should have three default parsers")
+				require.Equal(t, "openai-parser", parsers[0].TypedName().Name)
+				require.Equal(t, openai.OpenAIParserType, parsers[0].TypedName().Type)
+				require.Equal(t, "anthropic-parser", parsers[1].TypedName().Name)
+				require.Equal(t, anthropic.AnthropicParserType, parsers[1].TypedName().Type)
+				require.Equal(t, "vllmhttp-parser", parsers[2].TypedName().Name)
+				require.Equal(t, vllmhttp.VllmHTTPParserType, parsers[2].TypedName().Type)
 			},
 		},
 		{
@@ -523,9 +534,23 @@ func TestInstantiateAndConfigure(t *testing.T) {
 			configText: successParserWithNameConfigText,
 			wantErr:    false,
 			validate: func(t *testing.T, handle fwkplugin.Handle, rawCfg *configapi.EndpointPickerConfig, cfg *config.Config) {
-				require.NotNil(t, cfg.ParserConfig, "Parser config should be loaded")
-				require.Equal(t, "openaiParser", cfg.ParserConfig.Parser.TypedName().Name, "Should have openai parser name")
-				require.Equal(t, openai.OpenAIParserType, cfg.ParserConfig.Parser.TypedName().Type, "Should contain openai parser type")
+				require.NotNil(t, cfg.ParserRegistry, "Parser registry should be loaded")
+				parsers := cfg.ParserRegistry.Parsers()
+				require.Len(t, parsers, 1, "Should have one parser")
+				require.Equal(t, "openaiParser", parsers[0].TypedName().Name, "Should have openai parser name")
+				require.Equal(t, openai.OpenAIParserType, parsers[0].TypedName().Type, "Should contain openai parser type")
+			},
+		},
+		{
+			name:       "Success - Multiple Parsers Config",
+			configText: successMultipleParsersConfigText,
+			wantErr:    false,
+			validate: func(t *testing.T, handle fwkplugin.Handle, rawCfg *configapi.EndpointPickerConfig, cfg *config.Config) {
+				require.NotNil(t, cfg.ParserRegistry, "Parser registry should be loaded")
+				parsers := cfg.ParserRegistry.Parsers()
+				require.Len(t, parsers, 2, "Should have two parsers")
+				require.Equal(t, "openai-parser", parsers[0].TypedName().Name, "First parser should be openai-parser")
+				require.Equal(t, "secondParser", parsers[1].TypedName().Name, "Second parser should be secondParser")
 			},
 		},
 
@@ -543,11 +568,12 @@ func TestInstantiateAndConfigure(t *testing.T) {
 			configText: successDeprecatedTopLevelParserText,
 			wantErr:    false,
 			validate: func(t *testing.T, handle fwkplugin.Handle, rawCfg *configapi.EndpointPickerConfig, cfg *config.Config) {
-				require.NotNil(t, cfg.ParserConfig, "ParserConfig should be loaded")
-				require.Equal(t, "openai-parser", cfg.ParserConfig.Parser.TypedName().Name)
+				require.NotNil(t, cfg.ParserRegistry, "ParserRegistry should be loaded")
+				parsers := cfg.ParserRegistry.Parsers()
+				require.Len(t, parsers, 1, "Should have one parser")
+				require.Equal(t, "openai-parser", parsers[0].TypedName().Name)
 			},
 		},
-
 		// --- Instantiation Errors ---
 		{
 			name:       "Error (Instantiation) - Missing Type Field",
@@ -720,7 +746,7 @@ func TestInstantiateAndConfigure(t *testing.T) {
 			}
 
 			// 2. Instantiate & Configure
-			handle := igwtestutils.NewTestHandle(context.Background())
+			handle := testutils.NewTestHandle(context.Background())
 			cfg, err := InstantiateAndConfigure(rawConfig, handle, logger)
 
 			if tc.wantErr {
@@ -740,7 +766,7 @@ func TestInstantiateAndConfigure(t *testing.T) {
 // logs a warning but does not return an error.
 func TestBuildDataLayerConfigEmptySourcesWarning(t *testing.T) {
 	t.Parallel()
-	handle := igwtestutils.NewTestHandle(context.Background())
+	handle := testutils.NewTestHandle(context.Background())
 	cfg, err := buildDataLayerConfig(
 		&configapi.DataLayerConfig{Sources: []configapi.DataLayerSource{}},
 		handle,
@@ -899,6 +925,9 @@ func registerTestPlugins(t *testing.T) {
 	fwkplugin.Register(maxscore.MaxScorePickerType, maxscore.MaxScorePickerFactory)
 	fwkplugin.Register(single.SingleProfileHandlerType, single.SingleProfileHandlerFactory)
 	fwkplugin.Register(openai.OpenAIParserType, openai.OpenAIParserPluginFactory)
+	fwkplugin.Register(vertexai.VertexAIParserType, vertexai.VertexAIParserPluginFactory)
+	fwkplugin.Register(anthropic.AnthropicParserType, anthropic.AnthropicParserPluginFactory)
+	fwkplugin.Register(vllmhttp.VllmHTTPParserType, vllmhttp.VllmHTTPParserPluginFactory)
 	fwkplugin.Register(usagelimits.StaticUsageLimitPolicyType, usagelimits.StaticPolicyFactory)
 	fwkplugin.Register(prefix.PrefixCacheScorerPluginType, prefix.PrefixCachePluginFactory)
 	fwkplugin.Register(reqdataprodprefix.ApproxPrefixCachePluginType, reqdataprodprefix.ApproxPrefixCacheFactory)
@@ -994,7 +1023,7 @@ func TestEnsureSaturationDetector(t *testing.T) {
 				},
 			},
 		}
-		handle := igwtestutils.NewTestHandle(context.Background())
+		handle := testutils.NewTestHandle(context.Background())
 		allPlugins := map[string]fwkplugin.Plugin{
 			"existing-plugin": &mockSaturationDetector{},
 		}
@@ -1012,7 +1041,7 @@ func TestEnsureSaturationDetector(t *testing.T) {
 				},
 			},
 		}
-		handle := igwtestutils.NewTestHandle(context.Background())
+		handle := testutils.NewTestHandle(context.Background())
 		allPlugins := map[string]fwkplugin.Plugin{
 			"utilization-detector": &mockSaturationDetector{},
 		}
