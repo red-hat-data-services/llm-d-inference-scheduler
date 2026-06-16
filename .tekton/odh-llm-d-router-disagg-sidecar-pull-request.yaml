@@ -15,7 +15,7 @@ metadata:
     appstudio.openshift.io/component: odh-llm-d-router-disagg-sidecar-ci
     pipelines.appstudio.openshift.io/type: build
   name: odh-llm-d-router-disagg-sidecar-on-pull-request
-  namespace: open-data-hub-tenant
+  namespace: rhoai-tenant
 spec:
   params:
   - name: git-url
@@ -25,7 +25,7 @@ spec:
   - name: output-image
     value: quay.io/rhoai/odh-llm-d-router-disagg-sidecar:odh-pr
   - name: dockerfile
-    value: Dockerfile.sidecar.konflux
+    value: Dockerfile.konflux.sidecar
   - name: path-context
     value: .
   # additional params

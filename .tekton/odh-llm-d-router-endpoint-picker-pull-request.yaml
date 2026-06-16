@@ -2,7 +2,7 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   annotations:
-    build.appstudio.openshift.io/repo: https://github.com/opendatahub-io/llm-d-router?rev={{revision}}
+    build.appstudio.openshift.io/repo: https://github.com/red-hat-data-services/llm-d-inference-scheduler?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
@@ -11,11 +11,11 @@ metadata:
       == "main"
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: opendatahub-builds
+    appstudio.openshift.io/application: automation
     appstudio.openshift.io/component: odh-llm-d-router-endpoint-picker-ci
     pipelines.appstudio.openshift.io/type: build
   name: odh-llm-d-router-endpoint-picker-on-pull-request
-  namespace: open-data-hub-tenant
+  namespace: rhoai-tenant
 spec:
   params:
   - name: git-url
@@ -23,9 +23,9 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/opendatahub/odh-llm-d-router-endpoint-picker:odh-pr
+    value: quay.io/rhoai/odh-llm-d-router-endpoint-picker:odh-pr
   - name: dockerfile
-    value: Dockerfile.epp.konflux
+    value: Dockerfile.konflux.epp
   - name: path-context
     value: .
   # additional params
