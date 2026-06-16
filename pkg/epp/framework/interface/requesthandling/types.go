@@ -34,8 +34,13 @@ const nilStr = "<nil>"
 // Modality identifies the type of multimodal content in a prompt.
 type Modality string
 
-// ModalityImage is the only currently supported modality.
-const ModalityImage Modality = "image"
+// Modality values match the model-server's multimodal hash keys so labels agree
+// across backends.
+const (
+	ModalityImage Modality = "image"
+	ModalityAudio Modality = "audio"
+	ModalityVideo Modality = "video"
+)
 
 // RequestPayload represents a strongly-typed unmarshaled request payload or raw bytes.
 type RequestPayload interface {
@@ -103,13 +108,30 @@ type InferenceRequestBody struct {
 // It is consumed by scheduling and request-control plugins that benefit from
 // actual token data such as prefix-cache awareness.
 type TokenizedPrompt struct {
-	// TokenIDs are the token IDs for the prompt, including multimodal placeholder tokens.
-	TokenIDs []uint32
+	// PerPromptTokens holds the token IDs for each prompt in the request.
+	// Single-prompt requests (chat, generate, single-string completions) use a
+	// length-1 outer slice. Multi-string completions use one inner slice per
+	// prompt string.
+	PerPromptTokens [][]uint32
 	// MultiModalFeatures holds one entry per multimodal item in prompt order.
-	// Nil if the prompt contains no multimodal content.
+	// Nil if the prompt contains no multimodal content. Offsets are relative
+	// to PerPromptTokens[0] (always single-prompt when multimodal content is
+	// present).
 	MultiModalFeatures []MultiModalFeature
 	// CacheSalt isolates prefix caches across requests. Populated by the token-producer.
 	CacheSalt string
+}
+
+// TokenCount returns the total number of tokens across all prompts.
+func (tp *TokenizedPrompt) TokenCount() int {
+	if tp == nil {
+		return 0
+	}
+	n := 0
+	for _, pp := range tp.PerPromptTokens {
+		n += len(pp)
+	}
+	return n
 }
 
 // MultiModalFeature holds all data needed for prefix-cache scoring of a single

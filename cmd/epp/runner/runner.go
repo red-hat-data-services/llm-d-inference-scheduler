@@ -72,6 +72,7 @@ import (
 	srcmodels "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/source/models"
 	sourcenotifications "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/source/notifications"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/fairness/globalstrict"
+	programaware "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/fairness/program-aware"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/fairness/roundrobin"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/ordering/edf"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/ordering/fcfs"
@@ -99,6 +100,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/vllmhttp"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/filter/bylabel"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/filter/prefixcacheaffinity"
+	sessionaffinityfilter "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/filter/sessionaffinity"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/filter/sloheadroomtier"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/picker/maxscore"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/picker/random"
@@ -217,7 +219,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	logutil.InitLogging(&opts.ZapOptions)
 
 	if opts.Tracing {
-		shutdown, err := tracing.InitTracing(ctx, setupLog, "llm-d-router/epp")
+		shutdown, err := tracing.InitTracing(ctx, setupLog, "llm-d-epp")
 		if err != nil {
 			return fmt.Errorf("failed to init tracing %w", err)
 		}
@@ -400,6 +402,7 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 		PriorityBandControlPlane:         priorityBandControlPlane,
 		GRPCMaxRecvMsgSize:               opts.GRPCMaxRecvMsgSize,
 		GRPCMaxSendMsgSize:               opts.GRPCMaxSendMsgSize,
+		EnableGRPCStreamMetrics:          opts.EnableGRPCStreamMetrics,
 	}
 
 	if err := serverRunner.SetupWithManager(mgr); err != nil {
@@ -483,6 +486,7 @@ func (r *Runner) registerInTreePlugins() {
 	fwkplugin.Register(bylabel.EncodeRoleType, bylabel.EncodeRoleFactory)
 	fwkplugin.Register(bylabel.DecodeRoleType, bylabel.DecodeRoleFactory)
 	fwkplugin.Register(bylabel.PrefillRoleType, bylabel.PrefillRoleFactory)
+	fwkplugin.Register(sessionaffinityfilter.SessionAffinityType, sessionaffinityfilter.Factory)
 
 	// dataparallel profile handler
 	fwkplugin.Register(dataparallel.DataParallelProfileHandlerType, dataparallel.ProfileHandlerFactory)
@@ -522,6 +526,7 @@ func (r *Runner) registerInTreePlugins() {
 	// Flow Control plugins
 	fwkplugin.Register(globalstrict.GlobalStrictFairnessPolicyType, globalstrict.GlobalStrictFairnessPolicyFactory)
 	fwkplugin.Register(roundrobin.RoundRobinFairnessPolicyType, roundrobin.RoundRobinFairnessPolicyFactory)
+	fwkplugin.Register(programaware.ProgramAwarePluginType, programaware.ProgramAwarePluginFactory)
 	fwkplugin.Register(fcfs.FCFSOrderingPolicyType, fcfs.FCFSOrderingPolicyFactory)
 	fwkplugin.Register(edf.EDFOrderingPolicyType, edf.EDFOrderingPolicyFactory)
 	fwkplugin.Register(slodeadline.SLODeadlineOrderingPolicyType, slodeadline.SLODeadlineOrderingPolicyFactory)
@@ -943,6 +948,7 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 		SaturationDetector:               eppConfig.SaturationDetector,
 		GRPCMaxRecvMsgSize:               opts.GRPCMaxRecvMsgSize,
 		GRPCMaxSendMsgSize:               opts.GRPCMaxSendMsgSize,
+		EnableGRPCStreamMetrics:          opts.EnableGRPCStreamMetrics,
 	}
 
 	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
