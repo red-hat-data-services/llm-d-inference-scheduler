@@ -25,7 +25,7 @@ spec:
   - name: output-image
     value: quay.io/rhoai/odh-llm-d-router-disagg-sidecar:odh-pr
   - name: dockerfile
-    value: Dockerfile.konflux.sidecar
+    value: Dockerfile.sidecar.konflux
   - name: path-context
     value: .
   # additional params
