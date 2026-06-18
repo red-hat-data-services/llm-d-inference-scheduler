@@ -34,7 +34,7 @@ spec:
   - name: output-image
     value: quay.io/rhoai/pull-request-pipelines:odh-llm-d-disagg-sidecar:{{revision}}
   - name: dockerfile
-    value: Dockerfile.konflux.sidecar
+    value: Dockerfile.sidecar.konflux
   - name: path-context
     value: .
   - name: hermetic
