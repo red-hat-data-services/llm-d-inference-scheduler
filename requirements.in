@@ -5,3 +5,4 @@ transformers>=4.53.0
 jinja2>=2.11
 wheel==0.45.1
 PyYAML==6.0.3
+urllib3>=2.7.0
