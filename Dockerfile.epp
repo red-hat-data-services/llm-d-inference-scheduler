@@ -85,9 +85,11 @@ RUN mkdir -p /usr/local/lib/python3.12/site-packages/
 COPY --from=builder /workspace/kv-cache-manager-wrapper/render_jinja_template_wrapper.py /usr/local/lib/python3.12/site-packages/
 
 # Python deps (no cache, single target) – filter out torch
+# pillow pin overridden until kv-cache-manager bumps it (CVE-2026-59204);
+# must match the version in requirements.txt used for Konflux pip prefetch
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY --from=builder /workspace/kv-cache-manager-wrapper/requirements.txt /tmp/requirements.txt
-RUN sed '/^torch\b/d' /tmp/requirements.txt > /tmp/requirements.notorch.txt && \
+RUN sed -e '/^torch\b/d' -e 's/^pillow==.*/pillow==12.3.0/' /tmp/requirements.txt > /tmp/requirements.notorch.txt && \
     python3.12 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
     python3.12 -m pip install --no-cache-dir --target /usr/local/lib/python3.12/site-packages -r /tmp/requirements.notorch.txt && \
     python3.12 -m pip install --no-cache-dir --target /usr/local/lib/python3.12/site-packages PyYAML && \
