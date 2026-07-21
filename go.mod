@@ -1,6 +1,6 @@
 module github.com/llm-d/llm-d-inference-scheduler
 
-go 1.25.7
+go 1.26.5
 
 require (
 	github.com/go-logr/logr v1.4.3
