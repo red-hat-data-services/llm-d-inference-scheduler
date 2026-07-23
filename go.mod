@@ -1,6 +1,6 @@
 module github.com/llm-d/llm-d-inference-scheduler
 
-go 1.24.1
+go 1.26.5
 
 toolchain go1.24.2
 
