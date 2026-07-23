@@ -1,6 +1,6 @@
 module github.com/llm-d/llm-d-inference-scheduler
 
-go 1.25.8
+go 1.26.5
 
 require (
 	github.com/alicebob/miniredis/v2 v2.34.0
