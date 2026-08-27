@@ -15,9 +15,9 @@ COPY rhelai.repo /etc/yum.repos.d/rhelai.repo
 # Install only packages not already in the base image (gcc-c++, libstdc++, etc. are already present)
 # zeromq-devel is available from Red Hat Enterprise Linux AI repository
 # Install Rust and Cargo from Red Hat repositories (conforma compliant)
-# llvm-libs will be upgraded to satisfy Rust's dependency (tracked in lockfile)
-# annobin needs to be upgraded to a version compatible with LLVM 20.1
-RUN dnf install -y zeromq-devel rust cargo llvm-libs annobin && \
+# Base image has llvm-libs 21.1, but rust 1.88 requires llvm-libs 20.1
+# Use --allowerasing to downgrade llvm-libs and annobin to versions compatible with rust
+RUN dnf install -y --allowerasing zeromq-devel rust cargo llvm-libs annobin && \
     dnf upgrade -y python3-urllib3 && \
     dnf clean all && \
     rustc --version && \
