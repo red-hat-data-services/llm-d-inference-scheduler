@@ -61,6 +61,7 @@ RUN go build -mod=mod -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib -ltokeni
 
 # Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
+# Temporary Konflux validation build; do not merge this PR.
 FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:1d7c5517a4a1a8e2688620b39ee980e82505ca1ab7ae5541b5463120ae9b3897
 
 WORKDIR /
