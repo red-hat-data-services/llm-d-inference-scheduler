@@ -1,9 +1,9 @@
 module github.com/llm-d/llm-d-inference-scheduler
 
-go 1.25.7
+go 1.26.5
 
-// Pinned to go1.25.8 to ensure the fix for CVE-2025-61729 (GO-2025-4155) is included (requires >= 1.25.5)
-toolchain go1.25.8
+// Pinned to go1.26.7 to ensure the latest RHOAI 3.5 EA2 Go toolchain fixes are included.
+toolchain go1.26.7
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
