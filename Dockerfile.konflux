@@ -43,7 +43,7 @@ RUN go build -mod=mod -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib -ltokeni
 
 # Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:bba2b4bbf0ed15cfe7dd72a1e17ae7d2015a141f306b304e1a2785c41400e39c
 
 WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
