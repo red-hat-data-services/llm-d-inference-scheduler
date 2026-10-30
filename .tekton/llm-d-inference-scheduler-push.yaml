@@ -669,6 +669,15 @@ spec:
       optional: true
     - name: netrc
       optional: true
+  taskRunSpecs:
+  - pipelineTaskName: rpms-signature-scan
+    computeResources:
+      requests:
+        cpu: 2600m
+        memory: 512Mi
+      limits:
+        cpu: 2600m
+        memory: 512Mi
   taskRunTemplate:
     serviceAccountName: build-pipeline-llm-d-inference-scheduler
   workspaces:
