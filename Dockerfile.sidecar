@@ -1,4 +1,4 @@
-# Build Stage: using Go 1.25 image
+# Build Stage: using Go 1.26 image
 FROM --platform=${BUILDPLATFORM} quay.io/projectquay/golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
