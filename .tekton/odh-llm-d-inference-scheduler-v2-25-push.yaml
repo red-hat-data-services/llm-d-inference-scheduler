@@ -62,6 +62,15 @@ spec:
       value: '{{ target_branch }}'
     - name: pathInRepo
       value: pipelines/multi-arch-container-build.yaml
+  taskRunSpecs:
+  - pipelineTaskName: rpms-signature-scan
+    computeResources:
+      requests:
+        cpu: 2600m
+        memory: 512Mi
+      limits:
+        cpu: 2600m
+        memory: 512Mi
   taskRunTemplate:
     serviceAccountName: build-pipeline-odh-llm-d-inference-scheduler-v2-25
   workspaces:
