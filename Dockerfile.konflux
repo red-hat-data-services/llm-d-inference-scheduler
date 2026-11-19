@@ -1,5 +1,5 @@
 # Build Stage: using Go 1.26 image
-FROM registry.access.redhat.com/ubi9/go-toolset:1.26.10-1793107762@sha256:c8947b60e6568dcdc5f66d382e18fa1fb89039918f59783e45b8c90847579955 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.26.10-1793736700@sha256:c2bd0309bf78ae317024fdfc5602a31704e0dba9572f6d4b0bd4b681033dc965 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -61,7 +61,7 @@ RUN go build -mod=mod -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib -ltokeni
 
 # Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
-FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:1d7c5517a4a1a8e2688620b39ee980e82505ca1ab7ae5541b5463120ae9b3897
+FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:dfa0eb04abc59221544e74862432496add1f491f915c9b531880f91affc0e12c
 
 WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp

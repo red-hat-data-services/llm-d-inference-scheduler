@@ -9,7 +9,8 @@ metadata:
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     build.appstudio.openshift.io/build-nudge-files: "build/operator-nudging.yaml"
     pipelinesascode.tekton.dev/on-cel-expression: |
-      event == "push"
+      konflux_cluster == "stone-prod-p02"
+      && event == "push"
       && target_branch == "rhoai-2.25"
       && ( files.all.exists(p, !p.matches('^\\.tekton/')) || ".tekton/odh-llm-d-inference-scheduler-v2-25-push.yaml".pathChanged() )
   labels:
@@ -28,7 +29,7 @@ spec:
     value:
     - '{{target_branch}}-{{revision}}'
   - name: rhoai-version
-    value: "2.25.12"
+    value: "2.25.13"
   - name: output-image
     value: quay.io/rhoai/odh-llm-d-inference-scheduler-rhel9:{{target_branch}}
   - name: dockerfile
@@ -77,4 +78,15 @@ spec:
   - name: git-auth
     secret:
       secretName: '{{ git_auth_secret }}'
+  taskRunSpecs:
+  - pipelineTaskName: rpms-signature-scan
+    stepSpecs:
+    - name: rpms-signature-scan
+      computeResources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          cpu: "500m"
+          memory: "1Gi"
 status: {}
